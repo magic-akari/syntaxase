@@ -1,0 +1,35 @@
+{
+	"schema": 1,
+	"kind": "upstream",
+	"operation": "stripTypes",
+	"oracle": "reject",
+	"origins": [
+		{
+			"schema": 2,
+			"upstream": {
+				"commit": "74579cee118bb5f257fab7372f869cc107032316",
+				"id": "ts-blank-space-0.9.0",
+				"repository": "https://github.com/bloomberg/ts-blank-space.git",
+				"version": "0.9.0"
+			},
+			"adapter": "ts-blank-space@1",
+			"source": {
+				"endLine": 62,
+				"path": "tests/errors.test.ts",
+				"startLine": 57
+			},
+			"test": {
+				"api": "tsBlankSpace",
+				"invocation": 1,
+				"suite": [
+					"errors"
+				],
+				"title": "errors on TypeScript `module` declarations due to overlap with github.com/tc39/proposal-module-declarations"
+			},
+			"extraction": [
+				"call-argument",
+				"template-literal"
+			]
+		}
+	]
+}

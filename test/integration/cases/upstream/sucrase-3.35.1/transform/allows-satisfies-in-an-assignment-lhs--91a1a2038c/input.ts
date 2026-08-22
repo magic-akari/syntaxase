@@ -1,0 +1,3 @@
+
+      (a satisfies any) = null;
+    

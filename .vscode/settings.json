@@ -1,0 +1,8 @@
+{
+	"editor.defaultFormatter": "dprint.dprint",
+	"explorer.fileNesting.enabled": true,
+	"explorer.fileNesting.expand": false,
+	"explorer.fileNesting.patterns": {
+		"*.ts": "${capture}.js, ${capture}.js.map, ${capture}.d.ts, ${capture}.d.ts.map"
+	}
+}

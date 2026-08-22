@@ -1,0 +1,4 @@
+{
+	"kind": "error",
+	"error": "SyntaxError: Identifier 'x' has already been declared (96:4)\n"
+}

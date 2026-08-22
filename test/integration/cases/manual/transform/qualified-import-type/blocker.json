@@ -1,0 +1,4 @@
+{
+	"kind": "error",
+	"error": "SyntaxError: An import alias can not use 'import type'. (1:20)\n"
+}

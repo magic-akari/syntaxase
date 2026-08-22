@@ -1,0 +1,4 @@
+{
+	"kind": "error",
+	"error": "SyntaxError: 'static' modifier must precede 'readonly' modifier. (3:0)\n"
+}

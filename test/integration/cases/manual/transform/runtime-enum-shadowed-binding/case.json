@@ -1,0 +1,7 @@
+{
+	"schema": 1,
+	"kind": "manual",
+	"operation": "transform",
+	"invariant": "transform.enum-generated-name-hygiene",
+	"whyManual": "This end-to-end case combines source shadowing with JSX and enum-generated names after allocator unit coverage."
+}

@@ -1,0 +1,1 @@
+SyntaxError: Export 'c' is not defined (9:20)

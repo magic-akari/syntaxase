@@ -1,0 +1,1 @@
+SyntaxError: This syntax is reserved in files with the .mts or .cts extension. Add a trailing comma, as in `<T,>() => ...`. (2:16)

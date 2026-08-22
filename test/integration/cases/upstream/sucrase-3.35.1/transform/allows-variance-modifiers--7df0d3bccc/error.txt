@@ -1,0 +1,1 @@
+SyntaxError: Unexpected keyword 'extends' (7:22)

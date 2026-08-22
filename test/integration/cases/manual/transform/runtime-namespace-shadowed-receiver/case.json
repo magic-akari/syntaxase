@@ -1,0 +1,7 @@
+{
+	"schema": 1,
+	"kind": "manual",
+	"operation": "transform",
+	"invariant": "transform.namespace-shadowed-receiver",
+	"whyManual": "Nested namespace receivers must remain distinct from source bindings with colliding generated names."
+}

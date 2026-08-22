@@ -1,0 +1,1 @@
+SyntaxError: Comma is not permitted after the rest element (2:26)

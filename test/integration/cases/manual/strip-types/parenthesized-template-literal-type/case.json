@@ -1,0 +1,7 @@
+{
+	"schema": 1,
+	"kind": "manual",
+	"operation": "stripTypes",
+	"invariant": "strip-types.parenthesized-template-literal-type",
+	"whyManual": "This parser-precedence regression is not represented as an isolated upstream workload."
+}

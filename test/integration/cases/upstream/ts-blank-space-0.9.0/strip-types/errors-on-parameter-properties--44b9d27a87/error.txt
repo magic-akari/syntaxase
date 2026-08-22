@@ -1,0 +1,1 @@
+SyntaxError: Constructor parameter properties require runtime lowering (3:24)

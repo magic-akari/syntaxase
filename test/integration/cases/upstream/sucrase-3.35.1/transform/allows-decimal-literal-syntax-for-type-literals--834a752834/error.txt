@@ -1,0 +1,1 @@
+SyntaxError: Identifier directly after number (2:15)

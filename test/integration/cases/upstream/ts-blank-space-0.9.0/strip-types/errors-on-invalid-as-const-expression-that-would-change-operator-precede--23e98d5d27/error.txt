@@ -1,0 +1,1 @@
+SyntaxError: Type assertion cannot be erased without changing operator grouping (1:0)

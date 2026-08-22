@@ -1,0 +1,1 @@
+SyntaxError: Prefix-style type assertions are not erasable in place (1:5)

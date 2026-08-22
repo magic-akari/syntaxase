@@ -1,0 +1,5 @@
+
+      const o = {
+        interface: true,
+      };
+    

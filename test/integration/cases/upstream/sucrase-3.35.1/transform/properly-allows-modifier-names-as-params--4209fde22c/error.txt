@@ -1,0 +1,1 @@
+SyntaxError: Duplicate constructor in the same class (4:8)

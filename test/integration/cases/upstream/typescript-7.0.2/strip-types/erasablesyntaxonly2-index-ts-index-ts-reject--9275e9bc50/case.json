@@ -1,0 +1,35 @@
+{
+	"schema": 1,
+	"kind": "upstream",
+	"operation": "stripTypes",
+	"oracle": "reject",
+	"origins": [
+		{
+			"schema": 2,
+			"upstream": {
+				"commit": "4d4f005c8541e0255a9d8791205fdce326e462bc",
+				"id": "typescript-7.0.2",
+				"repository": "https://github.com/microsoft/TypeScript.git",
+				"version": "7.0.2"
+			},
+			"adapter": "typescript-erasable@3",
+			"source": {
+				"endLine": 7,
+				"path": "tests/cases/compiler/erasableSyntaxOnly2.ts",
+				"startLine": 5
+			},
+			"test": {
+				"api": "stripTypes",
+				"invocation": 1,
+				"suite": [
+					"erasableSyntaxOnly2"
+				],
+				"title": "erasableSyntaxOnly2: index.ts",
+				"variant": "index.ts:reject"
+			},
+			"extraction": [
+				"virtual-file"
+			]
+		}
+	]
+}

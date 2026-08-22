@@ -1,0 +1,7 @@
+{
+	"schema": 1,
+	"kind": "manual",
+	"operation": "transform",
+	"invariant": "transform.jsx-line-head-layout",
+	"whyManual": "Syntaxase preserves source line heads while replacing a multiline JSX tree; upstream cases do not isolate that layout contract."
+}

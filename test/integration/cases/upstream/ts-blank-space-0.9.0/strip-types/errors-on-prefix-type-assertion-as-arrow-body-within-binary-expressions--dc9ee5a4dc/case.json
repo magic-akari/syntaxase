@@ -1,0 +1,36 @@
+{
+	"schema": 1,
+	"kind": "upstream",
+	"operation": "stripTypes",
+	"oracle": "reject",
+	"origins": [
+		{
+			"schema": 2,
+			"upstream": {
+				"commit": "74579cee118bb5f257fab7372f869cc107032316",
+				"id": "ts-blank-space-0.9.0",
+				"repository": "https://github.com/bloomberg/ts-blank-space.git",
+				"version": "0.9.0"
+			},
+			"adapter": "ts-blank-space@1",
+			"source": {
+				"endLine": 354,
+				"path": "tests/errors.test.ts",
+				"startLine": 354
+			},
+			"test": {
+				"api": "tsBlankSpace",
+				"invocation": 1,
+				"suite": [
+					"errors"
+				],
+				"title": "errors on prefix type assertion as arrow body within binary expressions"
+			},
+			"extraction": [
+				"call-argument",
+				"const:tsInput",
+				"template-literal"
+			]
+		}
+	]
+}

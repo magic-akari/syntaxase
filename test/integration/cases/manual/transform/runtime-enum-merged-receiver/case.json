@@ -1,0 +1,7 @@
+{
+	"schema": 1,
+	"kind": "manual",
+	"operation": "transform",
+	"invariant": "transform.merged-enum-receiver",
+	"whyManual": "Multiple declarations of one enum must share the same runtime receiver."
+}

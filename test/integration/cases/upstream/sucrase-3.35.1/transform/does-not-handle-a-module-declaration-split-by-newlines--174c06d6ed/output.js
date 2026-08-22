@@ -1,0 +1,6 @@
+
+      declare
+      module
+      "A"
+      {}
+    

@@ -1,0 +1,7 @@
+{
+	"schema": 1,
+	"kind": "manual",
+	"operation": "transform",
+	"invariant": "transform.decorated-ambient-declaration",
+	"whyManual": "The decorator must be erased with its ambient declaration so no dangling runtime expression remains."
+}

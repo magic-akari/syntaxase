@@ -1,0 +1,7 @@
+{
+	"schema": 1,
+	"kind": "manual",
+	"operation": "transform",
+	"invariant": "transform.nested-runtime-feature-scheduling",
+	"whyManual": "Nested runtime lowerers must compose through JSX and other runtime replacements independently of discovery order."
+}

@@ -1,0 +1,224 @@
+{
+	"schema": 3,
+	"project": {
+		"commit": "4d4f005c8541e0255a9d8791205fdce326e462bc",
+		"id": "typescript-7.0.2",
+		"repository": "https://github.com/microsoft/TypeScript.git",
+		"version": "7.0.2"
+	},
+	"adapter": "typescript-erasable@3",
+	"implementationHash": "f13ddd73fbeaa5f55f8745f7d582c50866b9df748cc8cb14c9713d7f907c301c",
+	"configHash": "5e7be54ea358ec401c8b837639091614782ded4fd3e0707d1eee3a5662d07ec1",
+	"discoveryStats": {
+		"declarationVirtualFiles": 1,
+		"selectedCases": 2,
+		"virtualWorkloads": 4
+	},
+	"summary": {
+		"blocked": 0,
+		"deduplicated": 0,
+		"discovered": 4,
+		"excluded": 0,
+		"included": 4,
+		"selected": 4
+	},
+	"cases": [
+		{
+			"fingerprint": "066200c3d2404a6f4a9302862699aa7dc45e149c19d4df35cebd60defc9e0499",
+			"identities": [
+				{
+					"adapter": "typescript-erasable",
+					"sourcePath": "tests/cases/compiler/erasableSyntaxOnly.ts",
+					"suite": [
+						"erasableSyntaxOnly"
+					],
+					"title": "erasableSyntaxOnly: commonjs.cts",
+					"variant": "commonjs.cts:reject",
+					"invocation": 1,
+					"api": "stripTypes"
+				}
+			],
+			"target": "test/integration/cases/upstream/typescript-7.0.2/strip-types/erasablesyntaxonly-commonjs-cts-commonjs-cts-reject--d2d3217208",
+			"inputFile": "input.cts",
+			"inputSha256": "570b00f4cd4c3136679ff49e1d00b87566428ba1f7d52d38b1c83f204488c41b",
+			"oracle": "reject",
+			"origins": [
+				{
+					"schema": 2,
+					"upstream": {
+						"commit": "4d4f005c8541e0255a9d8791205fdce326e462bc",
+						"id": "typescript-7.0.2",
+						"repository": "https://github.com/microsoft/TypeScript.git",
+						"version": "7.0.2"
+					},
+					"adapter": "typescript-erasable@3",
+					"source": {
+						"endLine": 105,
+						"path": "tests/cases/compiler/erasableSyntaxOnly.ts",
+						"startLine": 102
+					},
+					"test": {
+						"api": "stripTypes",
+						"invocation": 1,
+						"suite": [
+							"erasableSyntaxOnly"
+						],
+						"title": "erasableSyntaxOnly: commonjs.cts",
+						"variant": "commonjs.cts:reject"
+					},
+					"extraction": [
+						"virtual-file"
+					]
+				}
+			]
+		},
+		{
+			"fingerprint": "9fe70a5f060ae772192f7b5b7010e4f86edecea9fbcf053bf3aa765a190ca7b2",
+			"identities": [
+				{
+					"adapter": "typescript-erasable",
+					"sourcePath": "tests/cases/compiler/erasableSyntaxOnly.ts",
+					"suite": [
+						"erasableSyntaxOnly"
+					],
+					"title": "erasableSyntaxOnly: esm.mts",
+					"variant": "esm.mts:accept",
+					"invocation": 1,
+					"api": "stripTypes"
+				}
+			],
+			"target": "test/integration/cases/upstream/typescript-7.0.2/strip-types/erasablesyntaxonly-esm-mts-esm-mts-accept--b5e2bdbcbf",
+			"inputFile": "input.mts",
+			"inputSha256": "984832c559a73833f43564885f8e0298571ae2672a86cb59cddf6219cb4f4771",
+			"oracle": "accept",
+			"origins": [
+				{
+					"schema": 2,
+					"upstream": {
+						"commit": "4d4f005c8541e0255a9d8791205fdce326e462bc",
+						"id": "typescript-7.0.2",
+						"repository": "https://github.com/microsoft/TypeScript.git",
+						"version": "7.0.2"
+					},
+					"adapter": "typescript-erasable@3",
+					"source": {
+						"endLine": 113,
+						"path": "tests/cases/compiler/erasableSyntaxOnly.ts",
+						"startLine": 112
+					},
+					"test": {
+						"api": "stripTypes",
+						"invocation": 1,
+						"suite": [
+							"erasableSyntaxOnly"
+						],
+						"title": "erasableSyntaxOnly: esm.mts",
+						"variant": "esm.mts:accept"
+					},
+					"extraction": [
+						"virtual-file"
+					]
+				}
+			]
+		},
+		{
+			"fingerprint": "f3e84c9b601fd39f38d2e78c0f4fb0e1d32ff48b57770976e6dc2f29e954ee58",
+			"identities": [
+				{
+					"adapter": "typescript-erasable",
+					"sourcePath": "tests/cases/compiler/erasableSyntaxOnly.ts",
+					"suite": [
+						"erasableSyntaxOnly"
+					],
+					"title": "erasableSyntaxOnly: index.ts",
+					"variant": "index.ts:reject",
+					"invocation": 1,
+					"api": "stripTypes"
+				}
+			],
+			"target": "test/integration/cases/upstream/typescript-7.0.2/strip-types/erasablesyntaxonly-index-ts-index-ts-reject--8eccbc60af",
+			"inputFile": "input.ts",
+			"inputSha256": "add2a5dbe4f9bb5d6c0533da37539d9e0b3be7ed83fc7111a30aaea83714ca21",
+			"oracle": "reject",
+			"origins": [
+				{
+					"schema": 2,
+					"upstream": {
+						"commit": "4d4f005c8541e0255a9d8791205fdce326e462bc",
+						"id": "typescript-7.0.2",
+						"repository": "https://github.com/microsoft/TypeScript.git",
+						"version": "7.0.2"
+					},
+					"adapter": "typescript-erasable@3",
+					"source": {
+						"endLine": 100,
+						"path": "tests/cases/compiler/erasableSyntaxOnly.ts",
+						"startLine": 6
+					},
+					"test": {
+						"api": "stripTypes",
+						"invocation": 1,
+						"suite": [
+							"erasableSyntaxOnly"
+						],
+						"title": "erasableSyntaxOnly: index.ts",
+						"variant": "index.ts:reject"
+					},
+					"extraction": [
+						"virtual-file"
+					]
+				}
+			]
+		},
+		{
+			"fingerprint": "2f68061990eb6e35f0ef593dcc33c7bf34a967018483ecc259bf8cdea1204e21",
+			"identities": [
+				{
+					"adapter": "typescript-erasable",
+					"sourcePath": "tests/cases/compiler/erasableSyntaxOnly2.ts",
+					"suite": [
+						"erasableSyntaxOnly2"
+					],
+					"title": "erasableSyntaxOnly2: index.ts",
+					"variant": "index.ts:reject",
+					"invocation": 1,
+					"api": "stripTypes"
+				}
+			],
+			"target": "test/integration/cases/upstream/typescript-7.0.2/strip-types/erasablesyntaxonly2-index-ts-index-ts-reject--9275e9bc50",
+			"inputFile": "input.ts",
+			"inputSha256": "6e09d39005ea92d70f565e4eade18bdeccc87dfaa3096035a138233fa5d4edd1",
+			"oracle": "reject",
+			"origins": [
+				{
+					"schema": 2,
+					"upstream": {
+						"commit": "4d4f005c8541e0255a9d8791205fdce326e462bc",
+						"id": "typescript-7.0.2",
+						"repository": "https://github.com/microsoft/TypeScript.git",
+						"version": "7.0.2"
+					},
+					"adapter": "typescript-erasable@3",
+					"source": {
+						"endLine": 7,
+						"path": "tests/cases/compiler/erasableSyntaxOnly2.ts",
+						"startLine": 5
+					},
+					"test": {
+						"api": "stripTypes",
+						"invocation": 1,
+						"suite": [
+							"erasableSyntaxOnly2"
+						],
+						"title": "erasableSyntaxOnly2: index.ts",
+						"variant": "index.ts:reject"
+					},
+					"extraction": [
+						"virtual-file"
+					]
+				}
+			]
+		}
+	],
+	"excluded": []
+}

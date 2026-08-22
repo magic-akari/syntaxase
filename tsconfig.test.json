@@ -1,0 +1,9 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"isolatedDeclarations": false,
+		"noEmit": true,
+		"sourceMap": false
+	},
+	"include": ["index.ts", "parser.ts", "internal/**/*.ts", "test/unit/type-contracts/**/*.ts"]
+}

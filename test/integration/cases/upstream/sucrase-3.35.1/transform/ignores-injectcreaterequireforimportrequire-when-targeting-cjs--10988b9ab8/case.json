@@ -1,0 +1,92 @@
+{
+	"schema": 1,
+	"kind": "upstream",
+	"operation": "transform",
+	"oracle": "input",
+	"origins": [
+		{
+			"schema": 2,
+			"upstream": {
+				"commit": "280ee202e73b18e396069782bd41e1eaaccbf620",
+				"id": "sucrase-3.35.1",
+				"repository": "https://github.com/alangpierce/sucrase.git",
+				"version": "3.35.1"
+			},
+			"adapter": "sucrase@2",
+			"source": {
+				"endLine": 929,
+				"path": "test/typescript-test.ts",
+				"startLine": 926
+			},
+			"test": {
+				"api": "syntaxase",
+				"invocation": 1,
+				"suite": [
+					"typescript transform"
+				],
+				"title": "ignores injectCreateRequireForImportRequire when targeting CJS"
+			},
+			"extraction": [
+				"template-literal"
+			]
+		},
+		{
+			"schema": 2,
+			"upstream": {
+				"commit": "280ee202e73b18e396069782bd41e1eaaccbf620",
+				"id": "sucrase-3.35.1",
+				"repository": "https://github.com/alangpierce/sucrase.git",
+				"version": "3.35.1"
+			},
+			"adapter": "sucrase@2",
+			"source": {
+				"endLine": 943,
+				"path": "test/typescript-test.ts",
+				"startLine": 940
+			},
+			"test": {
+				"api": "syntaxase",
+				"invocation": 1,
+				"suite": [
+					"typescript transform"
+				],
+				"title": "preserves import = require by default when targeting ESM"
+			},
+			"extraction": [
+				"template-literal"
+			]
+		},
+		{
+			"schema": 2,
+			"upstream": {
+				"commit": "280ee202e73b18e396069782bd41e1eaaccbf620",
+				"id": "sucrase-3.35.1",
+				"repository": "https://github.com/alangpierce/sucrase.git",
+				"version": "3.35.1"
+			},
+			"adapter": "sucrase@2",
+			"source": {
+				"endLine": 956,
+				"path": "test/typescript-test.ts",
+				"startLine": 953
+			},
+			"test": {
+				"api": "syntaxase",
+				"invocation": 1,
+				"suite": [
+					"typescript transform"
+				],
+				"title": "transforms import = require when targeting ESM and injectCreateRequireForImportRequire is enabled"
+			},
+			"extraction": [
+				"template-literal"
+			]
+		}
+	],
+	"options": {
+		"jsx": {
+			"development": true,
+			"runtime": "classic"
+		}
+	}
+}

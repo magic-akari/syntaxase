@@ -1,0 +1,1 @@
+1 + 1 as unknown as number / 2

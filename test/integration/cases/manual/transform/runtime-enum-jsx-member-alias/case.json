@@ -1,0 +1,7 @@
+{
+	"schema": 1,
+	"kind": "manual",
+	"operation": "transform",
+	"invariant": "transform.enum-member-alias-in-jsx",
+	"whyManual": "A duplicate enum member referenced from a nested JSX initializer must bind to the current generated alias."
+}

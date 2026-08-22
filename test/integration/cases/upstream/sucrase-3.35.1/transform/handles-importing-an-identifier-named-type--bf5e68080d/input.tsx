@@ -1,0 +1,3 @@
+
+      import type = require("A");
+    

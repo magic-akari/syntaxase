@@ -1,0 +1,15 @@
+*.log
+*.tgz
+*.tsbuildinfo
+/*.d.ts
+/*.d.ts.map
+/*.js
+/*.js.map
+/internal/**/*.d.ts
+/internal/**/*.d.ts.map
+/internal/**/*.js
+/internal/**/*.js.map
+/types/
+benchmark/.cache/
+coverage/
+node_modules/

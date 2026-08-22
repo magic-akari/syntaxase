@@ -1,0 +1,41 @@
+{
+	"schema": 1,
+	"kind": "upstream",
+	"operation": "transform",
+	"oracle": "input",
+	"origins": [
+		{
+			"schema": 2,
+			"upstream": {
+				"commit": "280ee202e73b18e396069782bd41e1eaaccbf620",
+				"id": "sucrase-3.35.1",
+				"repository": "https://github.com/alangpierce/sucrase.git",
+				"version": "3.35.1"
+			},
+			"adapter": "sucrase@2",
+			"source": {
+				"endLine": 1009,
+				"path": "test/jsx-test.ts",
+				"startLine": 1002
+			},
+			"test": {
+				"api": "syntaxase",
+				"invocation": 1,
+				"suite": [
+					"transform JSX"
+				],
+				"title": "allows custom JSX import source for automatic transform"
+			},
+			"extraction": [
+				"template-literal"
+			]
+		}
+	],
+	"options": {
+		"jsx": {
+			"development": false,
+			"runtime": "automatic",
+			"importSource": "my-lib"
+		}
+	}
+}

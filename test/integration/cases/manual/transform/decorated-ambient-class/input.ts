@@ -1,0 +1,2 @@
+@decorator
+declare class Example {}

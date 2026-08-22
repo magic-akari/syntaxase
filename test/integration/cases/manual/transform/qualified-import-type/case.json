@@ -1,0 +1,12 @@
+{
+	"schema": 1,
+	"kind": "manual",
+	"operation": "transform",
+	"invariant": "transform.qualified-import-type",
+	"whyManual": "This known parser gap is not represented by the selected upstream suites.",
+	"blocker": {
+		"dependency": "@sveltejs/acorn-typescript",
+		"issue": "https://github.com/sveltejs/acorn-typescript/issues/89",
+		"expected": "output"
+	}
+}

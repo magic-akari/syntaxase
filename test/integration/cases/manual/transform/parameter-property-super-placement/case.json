@@ -1,0 +1,7 @@
+{
+	"schema": 1,
+	"kind": "manual",
+	"operation": "transform",
+	"invariant": "transform.parameter-property-super-placement",
+	"whyManual": "Parameter-property assignments need distinct but related placement for statement and value-context super calls."
+}

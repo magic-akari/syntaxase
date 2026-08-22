@@ -1,0 +1,4 @@
+
+      @decorator<string>()
+      class Test {}
+    
