@@ -39,13 +39,15 @@
 		"node": ">=20"
 	},
 	"dependencies": {
-		"@sveltejs/acorn-typescript": "1.0.13",
-		"acorn": "8.18.0"
+		"@yuku-parser/wasm": "0.8.1",
+		"yuku-ast": "0.8.7"
 	},
 	"devDependencies": {
 		"@dprint/biome": "^0.13.6",
 		"@dprint/markdown": "^0.22.1",
 		"@dprint/oxc": "^0.34.0",
+		"@sveltejs/acorn-typescript": "1.0.13",
+		"acorn": "8.18.0",
 		"dprint": "^0.55.2",
 		"dprint-plugin-yaml": "^0.6.0",
 		"typescript": "7.0.2"

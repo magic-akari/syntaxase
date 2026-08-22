@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { walk } from "yuku-ast";
 
 import { transform } from "../../index.js";
-import { walkAst } from "../../internal/ast-walker.js";
 import { createEditTree, renderEditTree, sealFixedEdits } from "../../internal/edit-tree.js";
 import {
 	createRuntimeFeatureCollection,
+	collectRuntimeFeatureNode,
 	lowerRuntimeFeatures,
-	runtimeFeatureVisitors,
 } from "../../internal/runtime-transformer.js";
-import { createTypeEraser } from "../../internal/type-eraser.js";
+import { createTypeEraser, eraseTypeScriptNode } from "../../internal/type-eraser.js";
 import { parseTypeScript } from "../../parser.js";
 
 test("namespace lowering does not depend on feature task order", () => {
@@ -32,8 +32,16 @@ function transformWithReversedRuntimeFeatures(source) {
 	const sourceFile = parseTypeScript(source, false);
 	const fixedTree = createEditTree(source, sourceFile.layout);
 	const runtimeFeatures = createRuntimeFeatureCollection({ jsx: null });
-	const visitors = [createTypeEraser(sourceFile, fixedTree, "transform"), ...runtimeFeatureVisitors(runtimeFeatures)];
-	walkAst(sourceFile.ast, visitors);
+	const typeEraser = createTypeEraser(sourceFile, fixedTree, "transform");
+	walk(sourceFile.ast, {
+		enter(node, context) {
+			const eraseDescendants = eraseTypeScriptNode(node, context, typeEraser);
+			const collectDescendants = collectRuntimeFeatureNode(node, context, runtimeFeatures);
+			if (eraseDescendants === false || collectDescendants === false) {
+				context.skip();
+			}
+		},
+	});
 	runtimeFeatures.features.reverse();
 	const runtimeTree = sealFixedEdits(fixedTree);
 	lowerRuntimeFeatures(sourceFile, runtimeTree, runtimeFeatures);

@@ -429,8 +429,11 @@ function writeEnvironment(environment) {
 
 function writeIdentity(prefix, identity) {
 	const runtime = shortDigest(identity.runtimeSha256);
-	const acornTypeScript = shortDigest(identity.dependencies.acornTypeScript.sha256);
-	process.stdout.write(`${prefix}runtime ${runtime}; acorn-typescript ${acornTypeScript}\n`);
+	const dependencies = Object.entries(identity.dependencies)
+		.map(([name, dependency]) => `${name} ${shortDigest(dependency.sha256)}`)
+		.join("; ");
+	const suffix = dependencies === "" ? "" : `; ${dependencies}`;
+	process.stdout.write(`${prefix}runtime ${runtime}${suffix}\n`);
 }
 
 function shortDigest(digest) {

@@ -1,5 +1,14 @@
-import { isNode, type AstNode, type ExportDeclarationNode, type TsModuleDeclaration } from "../ast.ts";
-import { createAstVisitor, walkAst, type NodeContext } from "../ast-walker.ts";
+import type {
+	ExportAllDeclaration,
+	ExportDefaultDeclaration,
+	ExportNamedDeclaration,
+	Node,
+	Program,
+	ProgramStatement,
+	TSModuleBlock,
+	TSModuleDeclaration,
+} from "@yuku-parser/wasm";
+import { walk, type WalkContext } from "yuku-ast";
 import { syntaxErrorAt } from "../errors.ts";
 import {
 	isTypeOnlyModule,
@@ -25,28 +34,16 @@ interface NamespaceRuntimeBinding {
 
 interface NamespaceLowererData {
 	readonly baseCode: string;
-	readonly bindings: Map<TsModuleDeclaration, NamespaceRuntimeBinding>;
+	readonly bindings: Map<TSModuleDeclaration, NamespaceRuntimeBinding>;
 	readonly edits: EditTree<"runtime">;
 	readonly runtimeNames: RuntimeNameAllocator;
 	readonly source: string;
 	readonly sourceFile: SourceFile;
-	readonly validatedScopes: Set<AstNode>;
+	readonly validatedScopes: Set<NamespaceScope>;
 }
 
-interface NamespaceSyntaxNode extends AstNode {
-	readonly body?: NamespaceSyntaxNode | readonly NamespaceSyntaxNode[] | null;
-	readonly declaration?: NamespaceSyntaxNode | null;
-	readonly declare?: boolean;
-	readonly exportKind?: "type" | "value";
-	readonly id?: NamespaceSyntaxNode | null;
-	readonly importKind?: "type" | "value";
-	readonly isTypeOnly?: boolean;
-	readonly name?: string;
-}
-
-interface NamespaceModuleNode extends NamespaceSyntaxNode {
-	readonly body: NamespaceSyntaxNode;
-}
+type NamespaceExportNode = ExportAllDeclaration | ExportDefaultDeclaration | ExportNamedDeclaration;
+type NamespaceScope = Program | TSModuleBlock;
 
 const namespaceLowererData: unique symbol = Symbol("NamespaceLowererData");
 
@@ -65,16 +62,16 @@ export interface NamespaceLowererContext {
 interface NamespaceDeclarationTask {
 	readonly kind: "namespace";
 	readonly operation: "declaration";
-	readonly exportOwner: TsModuleDeclaration | null;
-	readonly node: TsModuleDeclaration;
-	readonly scope: AstNode | null;
+	readonly exportOwner: TSModuleDeclaration | null;
+	readonly node: TSModuleDeclaration;
+	readonly scope: NamespaceScope | null;
 }
 
 interface NamespaceExportTask {
 	readonly kind: "namespace";
 	readonly operation: "export";
-	readonly node: ExportDeclarationNode;
-	readonly owner: TsModuleDeclaration;
+	readonly node: NamespaceExportNode;
+	readonly owner: TSModuleDeclaration;
 }
 
 export type NamespaceFeatureTask = NamespaceDeclarationTask | NamespaceExportTask;
@@ -90,9 +87,9 @@ export function createNamespaceLowerer(context: NamespaceLowererContext): Namesp
 }
 
 export function collectNamespaceDeclarationFeature(
-	node: TsModuleDeclaration,
-	parent: AstNode | null,
-	ancestors: readonly AstNode[],
+	node: TSModuleDeclaration,
+	parent: Node | null,
+	ancestors: readonly Node[],
 ): NamespaceFeatureTask | null {
 	if (isTypeOnlyModule(node)) {
 		return null;
@@ -108,8 +105,8 @@ export function collectNamespaceDeclarationFeature(
 }
 
 export function collectNamespaceExportFeature(
-	node: ExportDeclarationNode,
-	ancestors: readonly AstNode[],
+	node: NamespaceExportNode,
+	ancestors: readonly Node[],
 ): NamespaceFeatureTask | null {
 	const owner = nearestRuntimeNamespace(ancestors);
 	if (owner === null) {
@@ -138,16 +135,16 @@ export function lowerNamespaceFeature(lowerer: NamespaceLowerer, task: Namespace
 
 function lowerNamespace(
 	lowerer: NamespaceLowerer,
-	node: TsModuleDeclaration,
-	exportOwner: TsModuleDeclaration | null,
+	node: TSModuleDeclaration,
+	exportOwner: TSModuleDeclaration | null,
 ): void {
 	const state = lowerer[namespaceLowererData];
 	const body = node.body;
-	if (body.type !== "TSModuleBlock") {
+	if (body?.type !== "TSModuleBlock") {
 		throw syntaxErrorAt(node, "Dotted runtime namespace declarations are not supported");
 	}
 	const binding = namespaceRuntimeBinding(node, state);
-	const id = node.id!;
+	const id = node.id;
 	const headerComments = sourceCommentsInRange(state.sourceFile, node.start, body.start + 1);
 	const header = createEditFragment();
 	recordEditFragmentLineHead(header, node.start);
@@ -167,13 +164,13 @@ function lowerNamespace(
 
 function lowerNamespaceExport(
 	lowerer: NamespaceLowerer,
-	node: ExportDeclarationNode,
-	owner: TsModuleDeclaration,
+	node: ExportNamedDeclaration,
+	owner: TSModuleDeclaration,
 ): void {
 	if (node.exportKind === "type") {
 		return;
 	}
-	const declaration = isNode(node.declaration) ? (node.declaration as NamespaceSyntaxNode) : null;
+	const declaration = node.declaration;
 	if (declaration === null) {
 		throw syntaxErrorAt(node, "Namespace export lists are not supported");
 	}
@@ -187,8 +184,8 @@ function lowerNamespaceExport(
 	) {
 		throw syntaxErrorAt(declaration, "This namespace export declaration is not supported");
 	}
-	const id = isNode(declaration.id) ? declaration.id : null;
-	if (id === null || id.type !== "Identifier" || typeof id.name !== "string") {
+	const id = declaration.id;
+	if (id === null || id.type !== "Identifier") {
 		throw syntaxErrorAt(declaration, "Namespace export declarations require an identifier");
 	}
 	const state = lowerer[namespaceLowererData];
@@ -197,7 +194,7 @@ function lowerNamespaceExport(
 	addRuntimeInsertion(state.edits, declaration.end, `${namespaceIdentifier}.${exportedName}=${exportedName};`);
 }
 
-function validateNamespaceScope(lowerer: NamespaceLowerer, scope: AstNode | null): void {
+function validateNamespaceScope(lowerer: NamespaceLowerer, scope: NamespaceScope | null): void {
 	const state = lowerer[namespaceLowererData];
 	if (scope === null || state.validatedScopes.has(scope)) {
 		return;
@@ -205,11 +202,9 @@ function validateNamespaceScope(lowerer: NamespaceLowerer, scope: AstNode | null
 	state.validatedScopes.add(scope);
 	const namespaces = new Set<string>();
 	const values = new Set<string>();
-	const statements = (
-		Array.isArray((scope as NamespaceSyntaxNode).body) ? (scope as NamespaceSyntaxNode).body : []
-	) as readonly NamespaceSyntaxNode[];
+	const statements = scope.body;
 	for (const statement of statements) {
-		const declaration = namespaceScopeDeclaration(statement) as NamespaceSyntaxNode | null;
+		const declaration = namespaceScopeDeclaration(statement);
 		if (declaration === null) {
 			continue;
 		}
@@ -217,7 +212,7 @@ function validateNamespaceScope(lowerer: NamespaceLowerer, scope: AstNode | null
 			if (isTypeOnlyModule(declaration)) {
 				continue;
 			}
-			if ((declaration as NamespaceModuleNode).body.type !== "TSModuleBlock") {
+			if (declaration.body?.type !== "TSModuleBlock") {
 				throw syntaxErrorAt(declaration, "Dotted runtime namespace declarations are not supported");
 			}
 			const name = namespaceName(declaration);
@@ -238,13 +233,13 @@ function validateNamespaceScope(lowerer: NamespaceLowerer, scope: AstNode | null
 	}
 }
 
-function namespaceRuntimeBinding(node: TsModuleDeclaration, state: NamespaceLowererData): NamespaceRuntimeBinding {
+function namespaceRuntimeBinding(node: TSModuleDeclaration, state: NamespaceLowererData): NamespaceRuntimeBinding {
 	const existing = state.bindings.get(node);
 	if (existing !== undefined) {
 		return existing;
 	}
 	const publicName = namespaceName(node);
-	const conflictsWithBody = namespaceReceiverHasCaptureRisk(node.body, publicName);
+	const conflictsWithBody = node.body === undefined ? false : namespaceReceiverHasCaptureRisk(node.body, publicName);
 	const receiverName = claimRuntimeReceiverName(
 		state.runtimeNames,
 		publicName,
@@ -260,19 +255,26 @@ interface NamespaceReceiverRiskState {
 	readonly publicName: string;
 }
 
-function namespaceReceiverHasCaptureRisk(body: AstNode, publicName: string): boolean {
+function namespaceReceiverHasCaptureRisk(body: TSModuleBlock, publicName: string): boolean {
 	const risk: NamespaceReceiverRiskState = { captureRisk: false, publicName };
-	walkAst(body, [createAstVisitor(risk, collectNamespaceReceiverCaptureRisk)]);
+	walk(body, {
+		enter(node, context) {
+			const descend = collectNamespaceReceiverCaptureRisk(node, context, risk);
+			if (descend === false) {
+				context.skip();
+			}
+		},
+	});
 	return risk.captureRisk;
 }
 
 function collectNamespaceReceiverCaptureRisk(
-	node: NamespaceSyntaxNode,
-	_context: NodeContext,
+	node: Node,
+	_context: WalkContext,
 	risk: NamespaceReceiverRiskState,
 ): boolean | void {
 	if (
-		node.declare === true ||
+		isDeclaredNamespaceSyntax(node) ||
 		node.type === "TSInterfaceDeclaration" ||
 		node.type === "TSTypeAliasDeclaration" ||
 		node.type === "TSNamespaceExportDeclaration" ||
@@ -285,7 +287,7 @@ function collectNamespaceReceiverCaptureRisk(
 		return;
 	}
 
-	let runtimeId: unknown = null;
+	let runtimeId: Node | null = null;
 	switch (node.type) {
 		case "FunctionDeclaration":
 		case "ClassDeclaration":
@@ -298,7 +300,7 @@ function collectNamespaceReceiverCaptureRisk(
 			runtimeId = isTypeOnlyModule(node) ? null : node.id;
 			break;
 		case "TSImportEqualsDeclaration":
-			runtimeId = node.importKind === "type" || node.isTypeOnly === true ? null : node.id;
+			runtimeId = node.importKind === "type" ? null : node.id;
 			break;
 		case "ArrowFunctionExpression":
 		case "TSDeclareFunction":
@@ -308,25 +310,21 @@ function collectNamespaceReceiverCaptureRisk(
 			return;
 	}
 
-	if (
-		isNode(runtimeId) &&
-		runtimeId.type === "Identifier" &&
-		(runtimeId as NamespaceSyntaxNode).name === risk.publicName
-	) {
+	if (runtimeId?.type === "Identifier" && runtimeId.name === risk.publicName) {
 		risk.captureRisk = true;
 	}
 	return false;
 }
 
-function namespaceName(node: AstNode): string {
-	const id = (node as NamespaceSyntaxNode).id!;
-	if (id.type !== "Identifier" || typeof id.name !== "string") {
+function namespaceName(node: TSModuleDeclaration): string {
+	const id = node.id;
+	if (id.type !== "Identifier") {
 		throw syntaxErrorAt(node, "Runtime namespace names must be identifiers");
 	}
 	return id.name;
 }
 
-function declarationScope(parent: AstNode | null, ancestors: readonly AstNode[]): AstNode | null {
+function declarationScope(parent: Node | null, ancestors: readonly Node[]): NamespaceScope | null {
 	if (parent?.type === "Program" || parent?.type === "TSModuleBlock") {
 		return parent;
 	}
@@ -337,14 +335,14 @@ function declarationScope(parent: AstNode | null, ancestors: readonly AstNode[])
 	return scope?.type === "Program" || scope?.type === "TSModuleBlock" ? scope : null;
 }
 
-function namespaceScopeDeclaration(node: AstNode): AstNode | null {
+function namespaceScopeDeclaration(node: ProgramStatement): Node | null {
 	if (node.type !== "ExportNamedDeclaration" && node.type !== "ExportDefaultDeclaration") {
 		return node;
 	}
-	return isNode((node as NamespaceSyntaxNode).declaration) ? (node as NamespaceSyntaxNode).declaration! : null;
+	return node.declaration;
 }
 
-function runtimeDeclarationName(node: AstNode): string | null {
+function runtimeDeclarationName(node: Node): string | null {
 	if (
 		node.type !== "FunctionDeclaration" &&
 		node.type !== "ClassDeclaration" &&
@@ -354,6 +352,21 @@ function runtimeDeclarationName(node: AstNode): string | null {
 	) {
 		return null;
 	}
-	const id = (node as NamespaceSyntaxNode).id;
-	return isNode(id) && id.type === "Identifier" && typeof id.name === "string" ? id.name : null;
+	const id = node.id;
+	return id?.type === "Identifier" ? id.name : null;
+}
+
+function isDeclaredNamespaceSyntax(node: Node): boolean {
+	switch (node.type) {
+		case "ClassDeclaration":
+		case "FunctionDeclaration":
+		case "VariableDeclaration":
+		case "TSDeclareFunction":
+		case "TSInterfaceDeclaration":
+		case "TSEnumDeclaration":
+		case "TSModuleDeclaration":
+			return node.declare === true;
+		default:
+			return false;
+	}
 }

@@ -1,12 +1,5 @@
-import type {
-	AstNode,
-	ExportDeclarationNode,
-	MethodDefinitionNode,
-	TsEnumDeclaration,
-	TsImportEqualsDeclaration,
-	TsModuleDeclaration,
-} from "./ast.ts";
-import { createAstVisitor, type AstVisitor, type NodeContext } from "./ast-walker.ts";
+import type { Node } from "@yuku-parser/wasm";
+import type { WalkContext } from "yuku-ast";
 import {
 	createJsxEmitter,
 	emitJsx,
@@ -56,11 +49,6 @@ interface RuntimeWalkState {
 	readonly runtimeNames: RuntimeNameAllocator;
 }
 
-interface RuntimeCollectionNode extends AstNode {
-	readonly declare?: boolean;
-	readonly name?: string;
-}
-
 type RuntimeFeatureTask =
 	| EnumFeatureTask
 	| ImportEqualsFeatureTask
@@ -84,13 +72,6 @@ export function createRuntimeFeatureCollection(options: RuntimeTransformOptions)
 		jsxConfig,
 		jsxNodes: [],
 	};
-}
-
-export function runtimeFeatureVisitors(collection: RuntimeFeatureCollection): readonly AstVisitor[] {
-	return [
-		createAstVisitor(collection.identifierNames, collectIdentifierName),
-		createAstVisitor(collection, collectRuntimeFeature),
-	];
 }
 
 export function lowerRuntimeFeatures(
@@ -133,17 +114,14 @@ export function lowerRuntimeFeatures(
 	appendJsxRuntimeImports(edits, jsxRuntimeImports(jsxEmitter));
 }
 
-function collectIdentifierName(node: RuntimeCollectionNode, _context: NodeContext, names: Set<string>): void {
-	if ((node.type === "Identifier" || node.type === "JSXIdentifier") && typeof node.name === "string") {
-		names.add(node.name);
-	}
-}
-
-function collectRuntimeFeature(
-	node: RuntimeCollectionNode,
-	context: NodeContext,
+export function collectRuntimeFeatureNode(
+	node: Node,
+	context: WalkContext,
 	collection: RuntimeFeatureCollection,
 ): boolean | void {
+	if (node.type === "Identifier" || node.type === "JSXIdentifier") {
+		collection.identifierNames.add(node.name);
+	}
 	if (collection.collectJsx && isJsxNode(node)) {
 		collection.jsxNodes.push(node);
 	}
@@ -152,25 +130,21 @@ function collectRuntimeFeature(
 	}
 	switch (node.type) {
 		case "TSEnumDeclaration": {
-			const task = collectEnumFeature(node as TsEnumDeclaration);
+			const task = collectEnumFeature(node);
 			if (task !== null) {
 				collection.features.push(task);
 			}
 			return;
 		}
 		case "TSImportEqualsDeclaration": {
-			const task = collectImportEqualsFeature(node as TsImportEqualsDeclaration, context.ancestors);
+			const task = collectImportEqualsFeature(node, context.parent, context.ancestors());
 			if (task !== null) {
 				collection.features.push(task);
 			}
 			return false;
 		}
 		case "TSModuleDeclaration": {
-			const task = collectNamespaceDeclarationFeature(
-				node as TsModuleDeclaration,
-				context.parent,
-				context.ancestors,
-			);
+			const task = collectNamespaceDeclarationFeature(node, context.parent, context.ancestors());
 			if (task === null) {
 				return false;
 			}
@@ -180,14 +154,14 @@ function collectRuntimeFeature(
 		case "ExportAllDeclaration":
 		case "ExportDefaultDeclaration":
 		case "ExportNamedDeclaration": {
-			const task = collectNamespaceExportFeature(node as ExportDeclarationNode, context.ancestors);
+			const task = collectNamespaceExportFeature(node, context.ancestors());
 			if (task !== null) {
 				collection.features.push(task);
 			}
 			return;
 		}
 		case "MethodDefinition": {
-			const task = collectParameterPropertiesFeature(node as MethodDefinitionNode, context.parent);
+			const task = collectParameterPropertiesFeature(node, context.parent);
 			if (task !== null) {
 				collection.features.push(task);
 			}

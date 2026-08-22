@@ -30,10 +30,5 @@
 				"whole-file"
 			]
 		}
-	],
-	"blocker": {
-		"dependency": "@sveltejs/acorn-typescript",
-		"expected": "output",
-		"reason": "the parser reports a duplicate binding while the upstream blanking fixture is intended to transform"
-	}
+	]
 }

@@ -30,5 +30,10 @@
 				"whole-file"
 			]
 		}
-	]
+	],
+	"blocker": {
+		"dependency": "@yuku-parser/wasm",
+		"expected": "output",
+		"reason": "Yuku reports diagnostics for TypeScript type arguments in decorator expressions"
+	}
 }

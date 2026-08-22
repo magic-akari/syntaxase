@@ -1,4 +1,4 @@
-import type { AstNode } from "./ast.ts";
+import type { Node } from "@yuku-parser/wasm";
 
 export interface LocatedSyntaxError extends SyntaxError {
 	pos: number;
@@ -8,13 +8,8 @@ export interface LocatedSyntaxError extends SyntaxError {
 	};
 }
 
-export function syntaxErrorAt(node: AstNode, message: string): LocatedSyntaxError {
-	const position = node.loc?.start;
-	const suffix = position === undefined ? "" : ` (${position.line}:${position.column})`;
-	const error = new SyntaxError(message + suffix) as LocatedSyntaxError;
+export function syntaxErrorAt(node: Node, message: string): LocatedSyntaxError {
+	const error = new SyntaxError(message) as LocatedSyntaxError;
 	error.pos = node.start;
-	if (position !== undefined) {
-		error.loc = { line: position.line, column: position.column };
-	}
 	return error;
 }

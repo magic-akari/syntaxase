@@ -1,5 +1,5 @@
-import { isNode, type AstNode, type TsEnumDeclaration, type TsEnumMember } from "../ast.ts";
-import { createAstVisitor, walkAst, type NodeContext } from "../ast-walker.ts";
+import type { Expression, Identifier, Node, TSEnumDeclaration, TSEnumMember } from "@yuku-parser/wasm";
+import { walk, type WalkContext } from "yuku-ast";
 import { syntaxErrorAt } from "../errors.ts";
 import { isIdentifierName, isStrictBindingIdentifier } from "../identifiers.ts";
 import { jsStringLiteral } from "../js-string.ts";
@@ -25,7 +25,7 @@ import { addRuntimeReplacement, type EditTree } from "../edit-tree.ts";
 
 export interface EnumFeatureTask {
 	readonly kind: "enum";
-	readonly node: TsEnumDeclaration;
+	readonly node: TSEnumDeclaration;
 }
 
 export interface EnumLoweringContext {
@@ -35,13 +35,7 @@ export interface EnumLoweringContext {
 	readonly sourceFile: SourceFile;
 }
 
-interface EnumSyntaxNode extends AstNode {
-	readonly computed?: boolean;
-	readonly name?: string;
-	readonly value?: unknown;
-}
-
-export function collectEnumFeature(node: TsEnumDeclaration): EnumFeatureTask | null {
+export function collectEnumFeature(node: TSEnumDeclaration): EnumFeatureTask | null {
 	return node.declare === true ? null : { kind: "enum", node };
 }
 
@@ -66,7 +60,7 @@ interface EnumEmission {
 }
 
 function emitEnum(
-	node: TsEnumDeclaration,
+	node: TSEnumDeclaration,
 	baseCode: string,
 	sourceFile: SourceFile,
 	runtimeNames: RuntimeNameAllocator,
@@ -74,7 +68,7 @@ function emitEnum(
 	const id = node.id;
 	const enumBindingText = baseCode.slice(id.start, id.end);
 	const enumName = id.name;
-	const members = node.members;
+	const members = node.body.members;
 	const statements = createEditFragment();
 	let previousValue: string | null = null;
 	const localPlan = createEnumLocalPlan(members, enumName, runtimeNames);
@@ -101,7 +95,7 @@ function emitEnum(
 		recordEditFragmentLineHead(statements, member.start);
 		const key = enumMemberKey(member, baseCode);
 		const variableName = memberLocals.get(member) ?? null;
-		const initializer = isNode(member.initializer) ? member.initializer : null;
+		const initializer = member.initializer;
 		const nextMember = members[memberIndex + 1];
 		const memberBoundary = nextMember?.start ?? node.end;
 
@@ -117,12 +111,11 @@ function emitEnum(
 			continue;
 		}
 
-		const memberId = isNode(member.id) ? member.id : null;
-		const prefixStart = memberId?.end ?? member.start;
+		const prefixStart = member.id.end;
 		const prefixComments = sourceCommentsInRange(sourceFile, prefixStart, initializer.start);
 		const value = emitEnumRuntimeExpression(initializer, referenceLocals, identifierReplacements);
 		const trailingComments = sourceCommentsInRange(sourceFile, initializer.end, memberBoundary);
-		if (initializer.type === "Literal" && typeof (initializer as EnumSyntaxNode).value === "string") {
+		if (initializer.type === "Literal" && typeof initializer.value === "string") {
 			if (variableName !== null) {
 				appendGenerated(statements, `const ${variableName}=${prefixComments}`);
 				appendEditFragment(statements, value);
@@ -164,10 +157,10 @@ function emitEnum(
 	return { identifierReplacements, replacement: finishEditFragment(result) };
 }
 
-function enumMemberKey(member: TsEnumMember, baseCode: string): string {
-	const id = member.id as EnumSyntaxNode;
+function enumMemberKey(member: TSEnumMember, baseCode: string): string {
+	const id = member.id;
 	if (id.type === "Identifier") {
-		return jsStringLiteral(String(id.name));
+		return jsStringLiteral(id.name);
 	}
 	if (id.type === "Literal" && typeof id.value === "string") {
 		return baseCode.slice(id.start, id.end);
@@ -175,14 +168,14 @@ function enumMemberKey(member: TsEnumMember, baseCode: string): string {
 	throw syntaxErrorAt(member, "Enum member names must be identifiers or strings");
 }
 
-function enumMemberReferenceName(member: TsEnumMember): string | null {
-	const id = member.id as EnumSyntaxNode;
-	const name = id.type === "Identifier" ? String(id.name) : typeof id.value === "string" ? id.value : "";
+function enumMemberReferenceName(member: TSEnumMember): string | null {
+	const id = member.id;
+	const name = id.type === "Identifier" ? id.name : id.type === "Literal" ? id.value : "";
 	return isIdentifierName(name) ? name : null;
 }
 
 interface EnumLocalPlan {
-	readonly memberLocals: ReadonlyMap<TsEnumMember, string>;
+	readonly memberLocals: ReadonlyMap<TSEnumMember, string>;
 	readonly receiverName: string;
 }
 
@@ -193,7 +186,7 @@ interface EnumNameClaimState {
 }
 
 function createEnumLocalPlan(
-	members: readonly TsEnumMember[],
+	members: readonly TSEnumMember[],
 	enumName: string,
 	runtimeNames: RuntimeNameAllocator,
 ): EnumLocalPlan {
@@ -204,7 +197,7 @@ function createEnumLocalPlan(
 	return { memberLocals, receiverName };
 }
 
-function collectEnumMemberNaturalNames(members: readonly TsEnumMember[]): Set<string> {
+function collectEnumMemberNaturalNames(members: readonly TSEnumMember[]): Set<string> {
 	const names = new Set<string>();
 	for (const member of members) {
 		const name = enumMemberReferenceName(member);
@@ -220,10 +213,10 @@ function claimEnumReceiverName(state: EnumNameClaimState): string {
 }
 
 function createEnumMemberLocals(
-	members: readonly TsEnumMember[],
+	members: readonly TSEnumMember[],
 	claimState: EnumNameClaimState,
-): Map<TsEnumMember, string> {
-	const result = new Map<TsEnumMember, string>();
+): Map<TSEnumMember, string> {
+	const result = new Map<TSEnumMember, string>();
 	const assignedNaturalNames = new Set<string>();
 	for (const member of members) {
 		const referenceName = enumMemberReferenceName(member);
@@ -258,25 +251,25 @@ interface EnumExpressionWalkState {
 }
 
 function emitEnumRuntimeExpression(
-	node: AstNode,
+	node: Expression,
 	referenceLocals: ReadonlyMap<string, string>,
 	replacements: EnumIdentifierReplacement[],
 ): EditFragment {
 	const state: EnumExpressionWalkState = { referenceLocals, replacements };
-	walkAst(node, [createAstVisitor(state, collectEnumExpressionReplacement)]);
+	walk(node, {
+		Identifier(candidate, walkContext) {
+			collectEnumExpressionReplacement(candidate, walkContext, state);
+		},
+	});
 	return originalExpression(node);
 }
 
 function collectEnumExpressionReplacement(
-	candidate: EnumSyntaxNode,
-	context: NodeContext,
+	candidate: Identifier,
+	context: WalkContext<Identifier>,
 	state: EnumExpressionWalkState,
 ): boolean | void {
-	if (
-		candidate.type !== "Identifier" ||
-		typeof candidate.name !== "string" ||
-		!isRuntimeIdentifierReference(candidate, context.parent, context.key)
-	) {
+	if (!isRuntimeIdentifierReference(candidate, context.parent, context.key)) {
 		return;
 	}
 	const local = state.referenceLocals.get(candidate.name);
@@ -285,15 +278,15 @@ function collectEnumExpressionReplacement(
 	}
 }
 
-function isRuntimeIdentifierReference(node: AstNode, parent: AstNode | null, key: string | null): boolean {
+function isRuntimeIdentifierReference(_node: Identifier, parent: Node | null, key: string | null): boolean {
 	if (parent === null) {
 		return true;
 	}
 	if (
-		(parent.type === "MemberExpression" && key === "property" && (parent as EnumSyntaxNode).computed !== true) ||
+		(parent.type === "MemberExpression" && key === "property" && parent.computed !== true) ||
 		((parent.type === "Property" || parent.type === "MethodDefinition" || parent.type === "PropertyDefinition") &&
 			key === "key" &&
-			(parent as EnumSyntaxNode).computed !== true) ||
+			parent.computed !== true) ||
 		parent.type === "LabeledStatement" ||
 		parent.type === "BreakStatement" ||
 		parent.type === "ContinueStatement"
@@ -307,10 +300,10 @@ function isRuntimeIdentifierReference(node: AstNode, parent: AstNode | null, key
 	) {
 		return false;
 	}
-	return node.type === "Identifier";
+	return true;
 }
 
-function originalExpression(node: AstNode): EditFragment {
+function originalExpression(node: Node): EditFragment {
 	const result = createEditFragment();
 	appendOriginal(result, node.start, node.end);
 	return finishEditFragment(result);

@@ -4,8 +4,9 @@ Syntaxase is a single parse followed by two edit phases:
 
 ```text
 source text
-  -> SourceFile (AST + token index + comments + physical-line layout)
-  -> one shared AST traversal
+  -> Yuku WASM parse (native AST + comments + diagnostics)
+  -> SourceFile (Yuku AST + source-gap cursor + physical-line layout)
+  -> one yuku-ast traversal
        -> fixed-width type erasure
        -> runtime feature, JSX, and identifier collection
   -> seal fixed edits
@@ -20,32 +21,29 @@ validation passes.
 
 ## Source model
 
-`parser.ts` creates one `SourceFile`. It owns the source text, Acorn AST,
-comments, an opaque token index, and one physical-line layout shared with the
-EditTree and JSX emitter. Raw tokens have no second owner. Comment and JSX range
-queries binary-search their already source-ordered parser data rather than
-building feature-local indexes. `SourceFile` does not precompute a semantic
-graph or retain a second node index.
+`parser.ts` calls `@yuku-parser/wasm` and creates one `SourceFile`. It owns the
+source text, the native Yuku `Program`, Yuku's flat comment list, an opaque
+source-gap cursor, and one physical-line layout shared with the EditTree and JSX
+emitter. Yuku diagnostics are surfaced directly rather than duplicating parser
+error or semantic checks. Comment and source-gap queries binary-search source-ordered
+Yuku spans rather than materializing a second token stream. `SourceFile` does
+not precompute a semantic graph or retain a second node index.
 
-`internal/ast.ts` exposes only shared parser-node identity and the typed task
-nodes used across module boundaries. Each feature owns a compile-time-only view
-of the additional parser fields it consumes. `internal/ast-walker.ts` discovers
-enumerable node-shaped children from the trusted, acyclic parser AST, so neither
-the shared node type nor structural recursion duplicates the parser's complete
-schema. Feature visitors select only the node types they consume. One walk can
-drive multiple visitors, and each visitor prunes its own view of a subtree
-without suppressing the others. Context ancestors are ephemeral traversal
-state; feature collectors retain only the context required by their typed tasks.
-A `stripTypes` call installs only the type-erasure visitor. A `transform` call
-installs type erasure, runtime feature collection, and conservative identifier
-collection on the same structural walk.
+Feature modules import Yuku's `Node` union and concrete node types directly.
+There is no normalized AST, compatibility shape, or project-owned walker.
+Traversal uses `yuku-ast.walk`, whose generated child schema stays synchronized
+with the parser and supplies native typed visitors plus `WalkContext`. A
+`stripTypes` call runs only type erasure. A `transform` call drives type erasure,
+runtime feature collection, and conservative identifier collection from the
+same Yuku walk. Collectors retain only the context required by their typed
+tasks.
 
-The parser AST remains the syntax authority. Syntax whose AST discriminant
-guarantees a token uses a required token locator and reports an internal parser
-invariant when that token is absent. Optional token locators are reserved for
-syntax whose absence is valid. Feature code may not guess a missing AST
-relationship or compensate for unsupported parser syntax. Parser gaps belong in
-the upstream blocker inventory.
+The Yuku AST remains the syntax authority. Syntax whose discriminant guarantees
+punctuation uses a bounded source-gap query between native node spans and
+reports an internal parser invariant when that text is absent. Optional queries
+are reserved for syntax whose absence is valid. Feature code may not guess a
+missing AST relationship or compensate for unsupported parser syntax. Parser
+gaps belong in the upstream blocker inventory.
 
 ## Lowering boundaries
 
@@ -59,7 +57,7 @@ the upstream blocker inventory.
   edits above rather than editing the same source range twice.
 - `internal/jsx-emitter.ts` owns JSX classification and emission; the runtime
   collector supplies the nodes found by the shared structural walk.
-- `internal/source-file.ts` owns shared source, token, and comment services.
+- `internal/source-file.ts` owns shared source, source-gap, and comment services.
   Feature modules do not keep private comment-ownership sets.
 - `internal/namespace-semantics.ts` memoizes only the runtime-state fact consumed
   by namespace lowering, using weak AST-node keys instead of a general semantic
@@ -111,13 +109,13 @@ production verification pass:
 6. Feature lowerers exclusively own their generated JavaScript. Fixed-width
    portions of runtime syntax remain owned by the type eraser, and all edits use
    original coordinates.
-7. Runtime name allocation starts from parser identifiers and never falls back
-   to token-string guessing.
+7. Runtime name allocation starts from Yuku identifiers and never falls back to
+   source-text guessing.
 8. Rendering is deterministic and does not mutate the EditTree.
 
 Compile-only contracts under `test/unit/type-contracts` protect phase and feature
-boundaries. `test/unit/ast-walker.test.js` protects independent visitor pruning and
-context snapshots.
+boundaries. `test/unit/yuku-walker.test.js` protects use of Yuku's native typed
+visitor and `WalkContext`.
 `test/unit/edit-tree.test.js` protects edit composition and layout. The complete
 integration tree protects exact output, including invisible whitespace. New internal
 validation loops are not a substitute for these contracts.
@@ -132,5 +130,6 @@ Add erasable syntax only to the fixed phase. Add runtime syntax to a focused
 feature lowerer. Put shared syntax classification in a shared module only when
 multiple consumers need it. Do not precompute semantic data without a concrete
 feature consumer. Edit composition and physical-line layout belong below all
-feature code. Do not add generic AST reflection, parser workarounds, token
-fallbacks, or feature-local source/comment state outside these owners.
+feature code. Do not add AST adapters, generic AST reflection, parser
+workarounds, token streams, or feature-local source/comment state outside these
+owners.

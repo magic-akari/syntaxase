@@ -1,1 +1,1 @@
-SyntaxError: Logical expressions and coalesce expressions cannot be mixed. Wrap either by parentheses (1:21)
+SyntaxError: Logical expressions and nullish coalescing cannot be mixed

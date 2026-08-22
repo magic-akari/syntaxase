@@ -1,59 +1,34 @@
-import {
-	isNode,
-	type AstNode,
-	type ClassBodyNode,
-	type FunctionLikeNode,
-	type MethodDefinitionNode,
-	type TsParameterProperty,
-} from "../ast.ts";
-import { createAstVisitor, walkAst, type NodeContext } from "../ast-walker.ts";
+import type { BlockStatement, ClassBody, MethodDefinition, Node, TSParameterProperty } from "@yuku-parser/wasm";
+import { walk, type WalkContext } from "yuku-ast";
 import { syntaxErrorAt } from "../errors.ts";
 import { addRuntimeInsertion, addRuntimeReplacement, type EditTree } from "../edit-tree.ts";
 import { findNonTransparentExpressionContext } from "./expression-context.ts";
 
-interface ParameterPropertySyntaxNode extends AstNode {
-	readonly abstract?: boolean;
-	readonly accessor?: boolean;
-	readonly body?: ParameterPropertySyntaxNode | readonly ParameterPropertySyntaxNode[] | null;
-	readonly callee?: ParameterPropertySyntaxNode;
-	readonly computed?: boolean;
-	readonly declare?: boolean;
-	readonly directive?: string;
-	readonly expression?: ParameterPropertySyntaxNode;
-	readonly key?: ParameterPropertySyntaxNode;
-	readonly kind?: string;
-	readonly left?: ParameterPropertySyntaxNode;
-	readonly name?: string;
-	readonly params?: readonly ParameterPropertySyntaxNode[];
-	readonly static?: boolean;
-	readonly value?: unknown;
-}
-
 export interface ParameterPropertiesFeatureTask {
 	readonly kind: "parameter-properties";
-	readonly classBody: ClassBodyNode;
-	readonly constructor: FunctionLikeNode;
-	readonly method: MethodDefinitionNode;
-	readonly properties: readonly TsParameterProperty[];
+	readonly classBody: ClassBody;
+	readonly constructor: MethodDefinition["value"];
+	readonly method: MethodDefinition;
+	readonly properties: readonly TSParameterProperty[];
 }
 
 export function collectParameterPropertiesFeature(
-	node: MethodDefinitionNode,
-	parent: AstNode | null,
+	node: MethodDefinition,
+	parent: Node | null,
 ): ParameterPropertiesFeatureTask | null {
 	if (parent?.type !== "ClassBody" || node.kind !== "constructor") {
 		return null;
 	}
 	const parameters = node.value.params;
 	const properties = parameters.filter(
-		(parameter): parameter is TsParameterProperty => parameter.type === "TSParameterProperty",
+		(parameter): parameter is TSParameterProperty => parameter.type === "TSParameterProperty",
 	);
 	if (properties.length === 0) {
 		return null;
 	}
 	return {
 		kind: "parameter-properties",
-		classBody: parent as ClassBodyNode,
+		classBody: parent,
 		constructor: node.value,
 		method: node,
 		properties,
@@ -66,7 +41,7 @@ export function lowerParameterProperties(task: ParameterPropertiesFeatureTask, e
 	lowerParameterPropertyClassFields(classBody, propertyNames, edits);
 
 	const body = constructor.body;
-	if (!isNode(body) || body.type !== "BlockStatement") {
+	if (body === null) {
 		throw syntaxErrorAt(method, "Constructor parameter properties require a body");
 	}
 
@@ -77,7 +52,14 @@ export function lowerParameterProperties(task: ParameterPropertiesFeatureTask, e
 		found: false,
 		edits,
 	};
-	walkAst(body, [createAstVisitor(superState, lowerParameterPropertySuperCall)]);
+	walk(body, {
+		enter(node, context) {
+			const descend = lowerParameterPropertySuperCall(node, context, superState);
+			if (descend === false) {
+				context.skip();
+			}
+		},
+	});
 	if (!superState.found) {
 		const assignmentStatementText = assignmentExpressions.map((assignment) => `${assignment};`).join("");
 		const insertionOffset = baseConstructorAssignmentOffset(body);
@@ -86,16 +68,19 @@ export function lowerParameterProperties(task: ParameterPropertiesFeatureTask, e
 }
 
 function lowerParameterPropertyClassFields(
-	classBody: ClassBodyNode,
+	classBody: ClassBody,
 	propertyNames: readonly string[],
 	edits: EditTree<"runtime">,
 ): void {
 	const requestedNames = new Set(propertyNames);
 	const runtimeFieldNames = new Set<string>();
-	const declareFieldSlots = new Map<string, AstNode>();
-	const members = classBody.body as readonly ParameterPropertySyntaxNode[];
+	const declareFieldSlots = new Map<string, Node>();
+	const members = classBody.body;
 
 	for (const member of members) {
+		if (member.type !== "PropertyDefinition") {
+			continue;
+		}
 		const fieldName = parameterPropertyClassFieldName(member);
 		if (fieldName === null || !requestedNames.has(fieldName)) {
 			continue;
@@ -130,26 +115,21 @@ function lowerParameterPropertyClassFields(
 	}
 }
 
-function parameterPropertyClassFieldName(node: ParameterPropertySyntaxNode): string | null {
-	if (
-		node.type !== "PropertyDefinition" ||
-		node.static === true ||
-		node.computed === true ||
-		!isNode(node.key) ||
-		node.key.type !== "Identifier" ||
-		typeof node.key.name !== "string"
-	) {
+function parameterPropertyClassFieldName(
+	node: Extract<ClassBody["body"][number], { type: "PropertyDefinition" }>,
+): string | null {
+	if (node.static === true || node.computed === true || node.key.type !== "Identifier") {
 		return null;
 	}
 	return node.key.name;
 }
 
-function isRuntimeDataField(node: ParameterPropertySyntaxNode): boolean {
-	return node.declare !== true && node.abstract !== true && node.accessor !== true;
+function isRuntimeDataField(node: Extract<ClassBody["body"][number], { type: "PropertyDefinition" }>): boolean {
+	return node.declare !== true;
 }
 
-function isReusableDeclareField(node: ParameterPropertySyntaxNode): boolean {
-	return node.declare === true && node.abstract !== true && node.accessor !== true && node.value === null;
+function isReusableDeclareField(node: Extract<ClassBody["body"][number], { type: "PropertyDefinition" }>): boolean {
+	return node.declare === true && node.value === null;
 }
 
 interface ParameterPropertySuperState {
@@ -159,22 +139,22 @@ interface ParameterPropertySuperState {
 }
 
 function lowerParameterPropertySuperCall(
-	node: ParameterPropertySyntaxNode,
-	context: NodeContext,
+	node: Node,
+	context: WalkContext,
 	state: ParameterPropertySuperState,
 ): boolean | void {
 	if (isNestedSuperScope(node)) {
 		return false;
 	}
-	if (node.type !== "CallExpression" || !isNode(node.callee) || node.callee.type !== "Super") {
+	if (node.type !== "CallExpression" || node.callee.type !== "Super") {
 		return;
 	}
 
 	state.found = true;
-	const expressionContext = findNonTransparentExpressionContext(node, context.ancestors);
+	const expressionContext = findNonTransparentExpressionContext(node, context.ancestors());
 	const isWholeStatement =
 		expressionContext?.parent.type === "ExpressionStatement" &&
-		(expressionContext.parent as ParameterPropertySyntaxNode).expression === expressionContext.value;
+		expressionContext.parent.expression === expressionContext.value;
 	if (isWholeStatement) {
 		addRuntimeInsertion(state.edits, node.end, `,${state.assignmentExpressionText}`);
 		return false;
@@ -185,7 +165,7 @@ function lowerParameterPropertySuperCall(
 	return false;
 }
 
-function isNestedSuperScope(node: AstNode): boolean {
+function isNestedSuperScope(node: Node): boolean {
 	return (
 		node.type === "FunctionDeclaration" ||
 		node.type === "FunctionExpression" ||
@@ -195,8 +175,8 @@ function isNestedSuperScope(node: AstNode): boolean {
 	);
 }
 
-function baseConstructorAssignmentOffset(body: ParameterPropertySyntaxNode): number {
-	const statements = Array.isArray(body.body) ? body.body : [];
+function baseConstructorAssignmentOffset(body: BlockStatement): number {
+	const statements = body.body;
 	let offset = body.start + 1;
 	for (const statement of statements) {
 		if (statement.type === "ExpressionStatement" && typeof statement.directive === "string") {
@@ -208,12 +188,9 @@ function baseConstructorAssignmentOffset(body: ParameterPropertySyntaxNode): num
 	return offset;
 }
 
-function parameterPropertyName(node: TsParameterProperty): string {
-	let parameter = node.parameter as ParameterPropertySyntaxNode;
-	if (parameter.type === "AssignmentPattern") {
-		parameter = parameter.left!;
-	}
-	if (parameter.type !== "Identifier" || typeof parameter.name !== "string") {
+function parameterPropertyName(node: TSParameterProperty): string {
+	const parameter = node.parameter.type === "AssignmentPattern" ? node.parameter.left : node.parameter;
+	if (parameter.type !== "Identifier") {
 		throw syntaxErrorAt(node, "Parameter property must use an identifier");
 	}
 	return parameter.name;

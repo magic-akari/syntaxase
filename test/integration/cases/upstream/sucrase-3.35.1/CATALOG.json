@@ -8,7 +8,7 @@
 	},
 	"adapter": "sucrase@2",
 	"implementationHash": "3970214c8ec36690504db438bb7ab02a549a6ab898d0e9d0a0ebbd7278b6d3ac",
-	"configHash": "86cf64c919792c9e29a2dbd98abe89dc63612aa5ed7467d9eda3c00f38da084c",
+	"configHash": "e54156d3453d4096b8e4bac2deec4911abe43b5ff3a5dcc458923cf785717726",
 	"discoveryStats": {
 		"active": 314,
 		"byCategory": {
@@ -88,7 +88,7 @@
 		}
 	},
 	"summary": {
-		"blocked": 3,
+		"blocked": 0,
 		"deduplicated": 14,
 		"discovered": 315,
 		"excluded": 4,
@@ -5458,11 +5458,6 @@
 					"runtime": "classic"
 				}
 			},
-			"blocker": {
-				"dependency": "@sveltejs/acorn-typescript",
-				"expected": "output",
-				"issue": "https://github.com/sveltejs/acorn-typescript/issues/89"
-			},
 			"oracle": "input",
 			"origins": [
 				{
@@ -7136,11 +7131,6 @@
 					"development": true,
 					"runtime": "classic"
 				}
-			},
-			"blocker": {
-				"dependency": "@sveltejs/acorn-typescript",
-				"expected": "output",
-				"issue": "https://github.com/sveltejs/acorn-typescript/issues/89"
 			},
 			"oracle": "input",
 			"origins": [
@@ -15296,11 +15286,6 @@
 					"development": true,
 					"runtime": "classic"
 				}
-			},
-			"blocker": {
-				"dependency": "@sveltejs/acorn-typescript",
-				"expected": "output",
-				"issue": "https://github.com/sveltejs/acorn-typescript/issues/89"
 			},
 			"oracle": "input",
 			"origins": [

@@ -3,5 +3,10 @@
 	"kind": "manual",
 	"operation": "transform",
 	"invariant": "transform.decorated-ambient-declaration",
-	"whyManual": "The decorator must be erased with its ambient declaration so no dangling runtime expression remains."
+	"whyManual": "The decorator must be erased with its ambient declaration so no dangling runtime expression remains.",
+	"blocker": {
+		"dependency": "@yuku-parser/wasm",
+		"expected": "output",
+		"reason": "Yuku reports a diagnostic when a decorator precedes an ambient class declaration"
+	}
 }

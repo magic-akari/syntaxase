@@ -1,25 +1,12 @@
-import { isNode as isAstNode, type AstNode } from "./ast.ts";
-import { createAstVisitor, type AstVisitor, type NodeContext } from "./ast-walker.ts";
+import type { Node } from "@yuku-parser/wasm";
+import type { WalkContext } from "yuku-ast";
 import { syntaxErrorAt } from "./errors.ts";
 import {
 	isSupportedRuntimeNamespaceExportDeclaration,
 	isTypeOnlyModule,
 	nearestRuntimeNamespace,
 } from "./namespace-semantics.ts";
-import {
-	findTokenByLabel,
-	firstTokenAtOrAfter,
-	lastTokenBefore,
-	requireLastTokenByLabel,
-	requireLastTokenByText,
-	requireLastTokenInRange,
-	requireTokenAtOrAfterByLabel,
-	requireTokenByLabel,
-	requireTokenByText,
-	tokenNameEnd,
-	tokenText,
-	type TokenIndexState,
-} from "./token-index.ts";
+import { findSourceText, previousSyntaxEnd, type SourceSpan } from "./source-gap.ts";
 import { containsLineTerminator } from "./source-layout.ts";
 import type { SourceFile } from "./source-file.ts";
 import { addFixedBlank, addFixedSubstitution, type EditTree } from "./edit-tree.ts";
@@ -39,73 +26,34 @@ const TYPE_RANGE_NODES: ReadonlySet<string> = new Set([
 	"TSTypeParameterInstantiation",
 ]);
 
-interface ErasureContext {
+export interface TypeEraser {
 	readonly exportedEnums: Set<string>;
 	readonly mode: ErasureMode;
 	readonly statementBoundaries: WeakMap<readonly unknown[], StatementBoundaryCursor>;
 	readonly sourceFile: SourceFile;
 	readonly edits: EditTree<"fixed">;
-	readonly tokens: TokenIndexState;
 }
 
 interface StatementBoundaryCursor {
 	nextIndex: number;
-	previousRuntimeStatement: AstNode | null;
-}
-
-/** Parser fields consumed only by fixed-width type erasure. */
-interface TypeErasureNode extends AstNode {
-	readonly abstract?: boolean;
-	readonly accessibility?: "private" | "protected" | "public";
-	readonly argument?: TypeErasureNode | null;
-	readonly async?: boolean;
-	readonly body?: TypeErasureNode | readonly TypeErasureNode[] | null;
-	readonly computed?: boolean;
-	readonly consequent?: TypeErasureNode | readonly TypeErasureNode[];
-	readonly declaration?: TypeErasureNode | null;
-	readonly declare?: boolean;
-	readonly decorators?: readonly TypeErasureNode[];
-	readonly definite?: boolean;
-	readonly exportKind?: "type" | "value";
-	readonly expression?: TypeErasureNode;
-	readonly id?: TypeErasureNode | null;
-	readonly implements?: readonly TypeErasureNode[];
-	readonly importKind?: "type" | "value";
-	readonly key?: TypeErasureNode;
-	readonly left?: TypeErasureNode;
-	readonly name?: string;
-	readonly operator?: string;
-	readonly optional?: boolean;
-	readonly override?: boolean;
-	readonly parameter?: TypeErasureNode;
-	readonly params?: readonly TypeErasureNode[];
-	readonly readonly?: boolean;
-	readonly returnType?: TypeErasureNode | null;
-	readonly specifiers?: readonly TypeErasureNode[];
-	readonly superTypeParameters?: TypeErasureNode | null;
-	readonly typeAnnotation?: TypeErasureNode | null;
-	readonly typeArguments?: TypeErasureNode | null;
-	readonly typeParameters?: TypeErasureNode | null;
-	readonly value?: unknown;
+	previousRuntimeStatement: Node | null;
 }
 
 export function createTypeEraser(
 	sourceFile: SourceFile,
 	edits: EditTree<"fixed">,
 	mode: "strip" | "transform",
-): AstVisitor {
-	const context: ErasureContext = {
+): TypeEraser {
+	return {
 		exportedEnums: new Set(),
 		mode,
 		statementBoundaries: new WeakMap(),
 		sourceFile,
 		edits,
-		tokens: sourceFile.tokenIndex,
 	};
-	return createAstVisitor(context, visitNode);
 }
 
-function visitNode(node: TypeErasureNode, walkContext: NodeContext, context: ErasureContext): boolean | void {
+export function eraseTypeScriptNode(node: Node, walkContext: WalkContext, context: TypeEraser): boolean | void {
 	if (isWholeTypeOnlyExport(node)) {
 		eraseWholeNode(node, context, needsSemicolonBeforeErasure(walkContext, context));
 		return false;
@@ -193,23 +141,28 @@ function visitNode(node: TypeErasureNode, walkContext: NodeContext, context: Era
 			eraseClassSyntax(node, context);
 			break;
 		case "PropertyDefinition":
-			if (node.abstract === true || node.declare === true) {
+		case "AccessorProperty":
+			if (node.declare === true) {
 				eraseWholeNode(node, context, needsSemicolonBeforeErasure(walkContext, context));
 				return false;
 			}
 			eraseMemberSyntax(node, context);
 			break;
-		case "MethodDefinition":
-			if (isDeclareMethod(node) || node.abstract === true) {
-				eraseWholeNode(node, context, needsSemicolonBeforeErasure(walkContext, context));
-				return false;
-			}
-			eraseMemberSyntax(node, context);
-			break;
-		case "TSIndexSignature":
+		case "TSAbstractPropertyDefinition":
+		case "TSAbstractAccessorProperty":
 			eraseWholeNode(node, context, needsSemicolonBeforeErasure(walkContext, context));
 			return false;
-		case "TSDeclareMethod":
+		case "MethodDefinition":
+			if (isDeclareMethod(node)) {
+				eraseWholeNode(node, context, needsSemicolonBeforeErasure(walkContext, context));
+				return false;
+			}
+			eraseMemberSyntax(node, context);
+			break;
+		case "TSAbstractMethodDefinition":
+			eraseWholeNode(node, context, needsSemicolonBeforeErasure(walkContext, context));
+			return false;
+		case "TSIndexSignature":
 			eraseWholeNode(node, context, needsSemicolonBeforeErasure(walkContext, context));
 			return false;
 		case "VariableDeclarator":
@@ -224,33 +177,61 @@ function visitNode(node: TypeErasureNode, walkContext: NodeContext, context: Era
 			break;
 		case "ArrowFunctionExpression":
 			eraseThisParameter(node, context);
-			fixArrowParentheses(node, context);
+			fixArrowParentheses(node, walkContext, context);
 			break;
 		default:
 			break;
 	}
 
 	eraseGenericTypeProperties(node, context);
-	eraseTypeScriptModifiers(node, context);
 }
 
-function eraseGenericTypeProperties(node: TypeErasureNode, context: ErasureContext): void {
-	const typeRanges = [
-		node.typeAnnotation,
-		node.typeParameters,
-		node.typeArguments,
-		node.returnType,
-		node.superTypeParameters,
-	];
-
+function eraseGenericTypeProperties(node: Node, context: TypeEraser): void {
+	const typeRanges = genericTypeRanges(node);
 	for (const value of typeRanges) {
-		if (isAstNode(value)) {
+		if (value !== null && value !== undefined) {
 			addFixedBlank(context.edits, value.start, value.end);
 		}
 	}
 }
 
-function eraseClassSyntax(node: TypeErasureNode, context: ErasureContext): void {
+function genericTypeRanges(node: Node): readonly (Node | null | undefined)[] {
+	switch (node.type) {
+		case "Identifier":
+		case "ArrayPattern":
+		case "ObjectPattern":
+		case "AssignmentPattern":
+		case "RestElement":
+			return [node.typeAnnotation];
+		case "FunctionDeclaration":
+		case "FunctionExpression":
+		case "ArrowFunctionExpression":
+		case "TSDeclareFunction":
+		case "TSEmptyBodyFunctionExpression":
+			return [node.typeParameters, node.returnType];
+		case "ClassDeclaration":
+		case "ClassExpression":
+			return [node.typeParameters, node.superTypeArguments];
+		case "CallExpression":
+		case "NewExpression":
+		case "TaggedTemplateExpression":
+		case "TSInstantiationExpression":
+		case "JSXOpeningElement":
+			return [node.typeArguments];
+		case "PropertyDefinition":
+		case "AccessorProperty":
+		case "TSAbstractPropertyDefinition":
+		case "TSAbstractAccessorProperty":
+			return [node.typeAnnotation];
+		default:
+			return [];
+	}
+}
+
+function eraseClassSyntax(
+	node: Extract<Node, { type: "ClassDeclaration" | "ClassExpression" }>,
+	context: TypeEraser,
+): void {
 	if (node.abstract === true) {
 		eraseRequiredKeyword(modifierStart(node), identifierStart(node), "abstract", context);
 	}
@@ -259,20 +240,21 @@ function eraseClassSyntax(node: TypeErasureNode, context: ErasureContext): void 
 	if (Array.isArray(implemented) && implemented.length > 0) {
 		const first = implemented[0];
 		const last = implemented[implemented.length - 1];
-		if (isAstNode(first) && isAstNode(last)) {
-			const keyword = requireLastTokenByText(context.tokens, node.start, first.start, "implements");
-			addFixedBlank(context.edits, keyword.start, last.end);
-		}
+		const keyword = requireSourceText(context, node.start, first!.start, "implements", "backward");
+		addFixedBlank(context.edits, keyword.start, last!.end);
 	}
 }
 
-function eraseMemberSyntax(node: TypeErasureNode, context: ErasureContext): void {
-	const key = isAstNode(node.key) ? node.key : undefined;
-	const boundary = key?.start ?? node.end;
+function eraseMemberSyntax(
+	node: Extract<Node, { type: "PropertyDefinition" | "AccessorProperty" | "MethodDefinition" }>,
+	context: TypeEraser,
+): void {
+	const key = node.key;
+	const boundary = key.start;
 	const searchStart = modifierStart(node);
 	let firstModifierStart = boundary;
 	let hasRemovableModifier = false;
-	if (node.readonly === true) {
+	if (node.type !== "MethodDefinition" && node.readonly === true) {
 		const modifierStart = eraseRequiredKeyword(searchStart, boundary, "readonly", context);
 		firstModifierStart = Math.min(firstModifierStart, modifierStart);
 		hasRemovableModifier = true;
@@ -288,46 +270,53 @@ function eraseMemberSyntax(node: TypeErasureNode, context: ErasureContext): void
 		hasRemovableModifier = true;
 	}
 
-	const decorators = Array.isArray(node.decorators) ? node.decorators.filter(isAstNode) : [];
+	const decorators = node.decorators;
 	if (node.computed === true && hasRemovableModifier && decorators.length === 0) {
 		addFixedSubstitution(context.edits, firstModifierStart, ";");
 	}
 
-	if (key === undefined) {
-		return;
-	}
 	const keyEnd = runtimeNameEnd(key, context);
-	const markerEnd = earliestNodeStart(node.typeAnnotation, node.typeParameters, node.value, node.end);
+	const markerEnd = memberMarkerEnd(node);
 	if (node.optional === true) {
 		eraseRequiredPunctuation(keyEnd, markerEnd, "?", context);
 	}
-	if (node.definite === true) {
+	if (node.type !== "MethodDefinition" && node.definite === true) {
 		eraseRequiredPunctuation(keyEnd, markerEnd, "!", context);
 	}
 }
 
-function eraseIdentifierSyntax(node: TypeErasureNode, context: ErasureContext): void {
+function memberMarkerEnd(
+	node: Extract<Node, { type: "PropertyDefinition" | "AccessorProperty" | "MethodDefinition" }>,
+): number {
+	if (node.type === "MethodDefinition") {
+		return node.value.start;
+	}
+	return earliestNodeStart(node.typeAnnotation, node.value, node.end);
+}
+
+function eraseIdentifierSyntax(node: Extract<Node, { type: "Identifier" }>, context: TypeEraser): void {
 	if (node.optional !== true) {
 		return;
 	}
-	const annotation = isAstNode(node.typeAnnotation) ? node.typeAnnotation : undefined;
+	const annotation = node.typeAnnotation;
 	const end = annotation?.start ?? node.end;
 	eraseRequiredPunctuation(runtimeNameEnd(node, context), end, "?", context);
 }
 
-function eraseVariableDefinite(node: TypeErasureNode, context: ErasureContext): void {
-	if (node.definite !== true || !isAstNode(node.id)) {
+function eraseVariableDefinite(node: Extract<Node, { type: "VariableDeclarator" }>, context: TypeEraser): void {
+	if (node.definite !== true) {
 		return;
 	}
-	const annotation = isAstNode(node.id.typeAnnotation) ? node.id.typeAnnotation : undefined;
+	const annotation = node.id.typeAnnotation;
 	const end = annotation?.start ?? node.id.end;
-	eraseRequiredPunctuation(runtimeNameEnd(node.id, context), end, "!", context);
+	const marker = requireSourceText(context, node.id.start, end, "!", "backward");
+	addFixedBlank(context.edits, marker.start, marker.end);
 }
 
-function eraseParameterPropertyModifiers(node: TypeErasureNode, context: ErasureContext): void {
-	if (!isAstNode(node.parameter)) {
-		return;
-	}
+function eraseParameterPropertyModifiers(
+	node: Extract<Node, { type: "TSParameterProperty" }>,
+	context: TypeEraser,
+): void {
 	const boundary = parameterRuntimeStart(node.parameter, context);
 	if (typeof node.accessibility === "string") {
 		eraseRequiredKeyword(node.start, boundary, node.accessibility, context);
@@ -340,30 +329,13 @@ function eraseParameterPropertyModifiers(node: TypeErasureNode, context: Erasure
 	}
 }
 
-function eraseTypeScriptModifiers(node: TypeErasureNode, context: ErasureContext): void {
-	if (node.type === "PropertyDefinition" || node.type === "MethodDefinition") {
-		return;
-	}
-
-	const boundary = identifierStart(node);
-	const searchStart = modifierStart(node);
-	if (node.readonly === true) {
-		eraseRequiredKeyword(searchStart, boundary, "readonly", context);
-	}
-	if (node.override === true) {
-		eraseRequiredKeyword(searchStart, boundary, "override", context);
-	}
-	if (typeof node.accessibility === "string") {
-		eraseRequiredKeyword(searchStart, boundary, node.accessibility, context);
-	}
-}
-
-function eraseSuffixExpression(node: TypeErasureNode, walkContext: NodeContext, context: ErasureContext): void {
-	if (!isAstNode(node.expression)) {
-		return;
-	}
-	const changesBinaryGrouping = assertionWouldChangeBinaryGrouping(node, context);
-	if (assertionNeedsExponentParentheses(node, context, changesBinaryGrouping)) {
+function eraseSuffixExpression(
+	node: Extract<Node, { type: "TSAsExpression" | "TSSatisfiesExpression" | "TSNonNullExpression" }>,
+	walkContext: WalkContext,
+	context: TypeEraser,
+): void {
+	const changesBinaryGrouping = assertionWouldChangeBinaryGrouping(node, walkContext);
+	if (assertionNeedsExponentParentheses(node, walkContext, changesBinaryGrouping)) {
 		preserveExponentAssertionGrouping(node, context);
 	} else if (context.mode === "strip" && changesBinaryGrouping) {
 		throw syntaxErrorAt(node, "Type assertion cannot be erased without changing operator grouping");
@@ -374,15 +346,15 @@ function eraseSuffixExpression(node: TypeErasureNode, walkContext: NodeContext, 
 	}
 }
 
-function erasePrefixAssertion(node: TypeErasureNode, context: ErasureContext): void {
-	if (!isAstNode(node.expression)) {
-		return;
-	}
+function erasePrefixAssertion(node: Extract<Node, { type: "TSTypeAssertion" }>, context: TypeEraser): void {
 	addFixedBlank(context.edits, node.start, node.expression.start);
 }
 
-function eraseThisParameter(node: TypeErasureNode, context: ErasureContext): void {
-	if (!Array.isArray(node.params) || node.params.length === 0) {
+function eraseThisParameter(
+	node: Extract<Node, { type: "FunctionDeclaration" | "FunctionExpression" | "ArrowFunctionExpression" }>,
+	context: TypeEraser,
+): void {
+	if (node.params.length === 0) {
 		return;
 	}
 	const first = node.params[0];
@@ -391,34 +363,44 @@ function eraseThisParameter(node: TypeErasureNode, context: ErasureContext): voi
 	}
 
 	const second = node.params[1];
-	if (isAstNode(second)) {
-		const comma = requireTokenByLabel(context.tokens, first.end, second.start, ",");
+	if (second !== undefined) {
+		const comma = requireSourceText(context, first.end, second.start, ",");
 		addFixedBlank(context.edits, first.start, comma.end);
 	} else {
-		const bodyStart = isAstNode(node.body) ? node.body.start : node.end;
-		const comma = findTokenByLabel(context.tokens, first.end, bodyStart, ",");
+		const bodyStart = node.body?.start ?? node.end;
+		const comma = findSourceText(context.sourceFile.gaps, first.end, bodyStart, ",");
 		addFixedBlank(context.edits, first.start, comma?.end ?? first.end);
 	}
 }
 
-function visitImportDeclaration(node: TypeErasureNode, walkContext: NodeContext, context: ErasureContext): void {
+function visitImportDeclaration(
+	node: Extract<Node, { type: "ImportDeclaration" }>,
+	walkContext: WalkContext,
+	context: TypeEraser,
+): void {
 	if (node.importKind === "type") {
 		eraseWholeNode(node, context, needsSemicolonBeforeErasure(walkContext, context));
 		return;
 	}
 
 	const specifiers = node.specifiers ?? [];
-	const typeSpecifiers = specifiers.filter((specifier) => specifier.importKind === "type");
+	const typeSpecifiers = specifiers.filter(
+		(specifier) => specifier.type === "ImportSpecifier" && specifier.importKind === "type",
+	);
 	if (typeSpecifiers.length === 0) {
 		return;
 	}
 	const named = specifiers.filter((specifier) => specifier.type === "ImportSpecifier");
 	for (const specifier of typeSpecifiers) {
-		eraseListItem(specifier, named, context);
+		eraseListItem(specifier, named, node, context);
 	}
 }
 
-function visitExportNamedDeclaration(node: TypeErasureNode, walkContext: NodeContext, context: ErasureContext): void {
+function visitExportNamedDeclaration(
+	node: Extract<Node, { type: "ExportNamedDeclaration" }>,
+	walkContext: WalkContext,
+	context: TypeEraser,
+): void {
 	if (context.mode === "transform") {
 		planTransformExportSyntax(node, walkContext, context);
 	}
@@ -433,17 +415,21 @@ function visitExportNamedDeclaration(node: TypeErasureNode, walkContext: NodeCon
 		return;
 	}
 	for (const specifier of typeSpecifiers) {
-		eraseListItem(specifier, specifiers, context);
+		eraseListItem(specifier, specifiers, node, context);
 	}
 }
 
-function planTransformExportSyntax(node: TypeErasureNode, walkContext: NodeContext, context: ErasureContext): void {
-	const declaration = isAstNode(node.declaration) ? node.declaration : null;
+function planTransformExportSyntax(
+	node: Extract<Node, { type: "ExportNamedDeclaration" }>,
+	walkContext: WalkContext,
+	context: TypeEraser,
+): void {
+	const declaration = node.declaration;
 	if (declaration === null) {
 		return;
 	}
 
-	const namespace = nearestRuntimeNamespace(walkContext.ancestors);
+	const namespace = nearestRuntimeNamespace(walkContext.ancestors());
 	if (namespace !== null) {
 		if (isSupportedRuntimeNamespaceExportDeclaration(declaration)) {
 			blankExportKeyword(node, declaration, context);
@@ -454,10 +440,7 @@ function planTransformExportSyntax(node: TypeErasureNode, walkContext: NodeConte
 	if (declaration.type !== "TSEnumDeclaration" || declaration.declare === true) {
 		return;
 	}
-	const id = isAstNode(declaration.id) ? declaration.id : null;
-	if (id === null || typeof id.name !== "string") {
-		return;
-	}
+	const id = declaration.id;
 	if (context.exportedEnums.has(id.name)) {
 		blankExportKeyword(node, declaration, context);
 	} else {
@@ -465,25 +448,32 @@ function planTransformExportSyntax(node: TypeErasureNode, walkContext: NodeConte
 	}
 }
 
-function blankExportKeyword(wrapper: AstNode, declaration: AstNode, context: ErasureContext): void {
-	const exportToken = requireTokenByText(context.tokens, wrapper.start, declaration.start, "export");
+function blankExportKeyword(wrapper: Node, declaration: Node, context: TypeEraser): void {
+	const exportToken = requireSourceText(context, wrapper.start, declaration.start, "export");
 	addFixedBlank(context.edits, exportToken.start, exportToken.end);
 }
 
-function eraseListItem(item: AstNode, _siblings: readonly AstNode[], context: ErasureContext): void {
-	const trailing = firstTokenAtOrAfter(context.tokens, item.end);
-	if (trailing?.type.label === ",") {
-		addFixedBlank(context.edits, item.start, trailing.end);
+function eraseListItem(item: Node, siblings: readonly Node[], container: Node, context: TypeEraser): void {
+	const itemIndex = siblings.indexOf(item);
+	const next = itemIndex < 0 ? undefined : siblings[itemIndex + 1];
+	const gapEnd = next?.start ?? findListClosingBrace(item.end, container.end, context).start;
+	const comma = findSourceText(context.sourceFile.gaps, item.end, gapEnd, ",");
+	if (comma !== undefined) {
+		addFixedBlank(context.edits, item.start, comma.end);
 		return;
 	}
 	addFixedBlank(context.edits, item.start, item.end);
 }
 
-function eraseWholeNode(node: AstNode, context: ErasureContext, insertSemicolon = false): void {
+function findListClosingBrace(start: number, end: number, context: TypeEraser): SourceSpan {
+	return requireSourceText(context, start, end, "}");
+}
+
+function eraseWholeNode(node: Node, context: TypeEraser, insertSemicolon = false): void {
 	eraseWholeRange(node.start, node.end, context, insertSemicolon);
 }
 
-function eraseWholeRange(start: number, end: number, context: ErasureContext, insertSemicolon = false): void {
+function eraseWholeRange(start: number, end: number, context: TypeEraser, insertSemicolon = false): void {
 	addFixedBlank(context.edits, start, end);
 	if (!insertSemicolon) {
 		return;
@@ -503,7 +493,7 @@ function firstNonWhitespace(source: string, start: number, end: number): number 
 	return null;
 }
 
-function needsSemicolonBeforeErasure(walkContext: NodeContext, context: ErasureContext): boolean {
+function needsSemicolonBeforeErasure(walkContext: WalkContext, context: TypeEraser): boolean {
 	const { parent, key, index } = walkContext;
 	if (parent === null || key === null) {
 		return false;
@@ -514,19 +504,15 @@ function needsSemicolonBeforeErasure(walkContext: NodeContext, context: ErasureC
 	if (key !== "body" && key !== "consequent") {
 		return false;
 	}
-	const statements = (parent as TypeErasureNode)[key];
-	if (!Array.isArray(statements)) {
+	const statements = statementList(parent, key);
+	if (statements === null) {
 		return false;
 	}
 	const statement = previousRuntimeStatement(statements, index, context);
 	return statement !== null && context.sourceFile.text[statement.end - 1] !== ";";
 }
 
-function previousRuntimeStatement(
-	statements: readonly unknown[],
-	index: number,
-	context: ErasureContext,
-): AstNode | null {
+function previousRuntimeStatement(statements: readonly Node[], index: number, context: TypeEraser): Node | null {
 	let cursor = context.statementBoundaries.get(statements);
 	if (cursor === undefined || index < cursor.nextIndex) {
 		cursor = { nextIndex: 0, previousRuntimeStatement: null };
@@ -534,7 +520,7 @@ function previousRuntimeStatement(
 	}
 	while (cursor.nextIndex < index) {
 		const statement = statements[cursor.nextIndex];
-		if (isAstNode(statement) && !isErasableStatement(statement as TypeErasureNode)) {
+		if (statement !== undefined && !isErasableStatement(statement)) {
 			cursor.previousRuntimeStatement = statement;
 		}
 		cursor.nextIndex += 1;
@@ -544,7 +530,26 @@ function previousRuntimeStatement(
 	return cursor.previousRuntimeStatement;
 }
 
-function isRequiredStatementSlot(parent: AstNode, key: string): boolean {
+function statementList(parent: Node, key: string): readonly Node[] | null {
+	if (key === "body") {
+		switch (parent.type) {
+			case "Program":
+			case "BlockStatement":
+			case "ClassBody":
+			case "TSModuleBlock":
+			case "StaticBlock":
+				return parent.body;
+			default:
+				break;
+		}
+	}
+	if (key === "consequent" && parent.type === "SwitchCase") {
+		return parent.consequent;
+	}
+	return null;
+}
+
+function isRequiredStatementSlot(parent: Node, key: string): boolean {
 	if (parent.type === "IfStatement") {
 		return key === "consequent" || key === "alternate";
 	}
@@ -563,7 +568,7 @@ function isRequiredStatementSlot(parent: AstNode, key: string): boolean {
 	return false;
 }
 
-function isErasableStatement(node: TypeErasureNode): boolean {
+function isErasableStatement(node: Node): boolean {
 	if (WHOLE_TYPE_DECLARATIONS.has(node.type) || isWholeTypeOnlyExport(node) || isDeclareRuntimeDeclaration(node)) {
 		return true;
 	}
@@ -576,31 +581,38 @@ function isErasableStatement(node: TypeErasureNode): boolean {
 	if (node.type === "ImportDeclaration") {
 		return node.importKind === "type";
 	}
-	if (node.type === "PropertyDefinition") {
-		return node.abstract === true || node.declare === true;
+	if (node.type === "PropertyDefinition" || node.type === "AccessorProperty") {
+		return node.declare === true;
 	}
 	if (node.type === "MethodDefinition") {
-		return node.abstract === true || isDeclareMethod(node);
+		return isDeclareMethod(node);
 	}
-	if (node.type === "TSIndexSignature" || node.type === "TSDeclareMethod") {
+	if (
+		node.type === "TSAbstractPropertyDefinition" ||
+		node.type === "TSAbstractAccessorProperty" ||
+		node.type === "TSAbstractMethodDefinition" ||
+		node.type === "TSIndexSignature"
+	) {
 		return true;
 	}
 	return false;
 }
 
-function endsContainingStatement(node: AstNode, walkContext: NodeContext, source: string): boolean {
+function endsContainingStatement(node: Node, walkContext: WalkContext, source: string): boolean {
 	if (source[node.end] === ";") {
 		return false;
 	}
-	for (let index = walkContext.ancestors.length - 1; index >= 0; index -= 1) {
-		const ancestor = walkContext.ancestors[index]!;
+	const ancestors = walkContext.ancestors();
+	for (let index = ancestors.length - 1; index >= 0; index -= 1) {
+		const ancestor = ancestors[index]!;
 		if (ancestor.end !== node.end) {
 			continue;
 		}
 		if (
 			ancestor.type.endsWith("Statement") ||
 			ancestor.type.endsWith("Declaration") ||
-			ancestor.type === "PropertyDefinition"
+			ancestor.type === "PropertyDefinition" ||
+			ancestor.type === "AccessorProperty"
 		) {
 			return true;
 		}
@@ -608,27 +620,30 @@ function endsContainingStatement(node: AstNode, walkContext: NodeContext, source
 	return false;
 }
 
-function assertionWouldChangeBinaryGrouping(node: TypeErasureNode, context: ErasureContext): boolean {
+function assertionWouldChangeBinaryGrouping(
+	node: Extract<Node, { type: "TSAsExpression" | "TSSatisfiesExpression" | "TSNonNullExpression" }>,
+	walkContext: WalkContext,
+): boolean {
 	let expression = node.expression;
-	while (
-		isAstNode(expression) &&
-		(expression.type === "TSAsExpression" || expression.type === "TSSatisfiesExpression")
-	) {
+	while (expression.type === "TSAsExpression" || expression.type === "TSSatisfiesExpression") {
 		expression = expression.expression;
 	}
 	if (
-		!isAstNode(expression) ||
 		(expression.type !== "BinaryExpression" && expression.type !== "LogicalExpression") ||
 		typeof expression.operator !== "string"
 	) {
 		return false;
 	}
 
-	const next = firstTokenAtOrAfter(context.tokens, node.end);
-	if (next === undefined) {
+	const parent = walkContext.parent;
+	if (
+		parent === null ||
+		walkContext.key !== "left" ||
+		(parent.type !== "BinaryExpression" && parent.type !== "LogicalExpression")
+	) {
 		return false;
 	}
-	const nextOperator = tokenText(context.tokens, next);
+	const nextOperator = parent.operator;
 	const basePrecedence = binaryPrecedence(expression.operator);
 	const nextPrecedence = binaryPrecedence(nextOperator);
 	if (basePrecedence === undefined || nextPrecedence === undefined) {
@@ -641,15 +656,12 @@ function assertionWouldChangeBinaryGrouping(node: TypeErasureNode, context: Eras
 }
 
 function assertionNeedsExponentParentheses(
-	node: TypeErasureNode,
-	context: ErasureContext,
+	node: Extract<Node, { type: "TSAsExpression" | "TSSatisfiesExpression" | "TSNonNullExpression" }>,
+	walkContext: WalkContext,
 	changesBinaryGrouping: boolean,
 ): boolean {
-	if (!isAstNode(node.expression)) {
-		return false;
-	}
-	const next = firstTokenAtOrAfter(context.tokens, node.end);
-	if (next === undefined || tokenText(context.tokens, next) !== "**") {
+	const parent = walkContext.parent;
+	if (parent?.type !== "BinaryExpression" || walkContext.key !== "left" || parent.operator !== "**") {
 		return false;
 	}
 	return (
@@ -659,13 +671,15 @@ function assertionNeedsExponentParentheses(
 	);
 }
 
-function preserveExponentAssertionGrouping(node: TypeErasureNode, context: ErasureContext): void {
-	const expression = isAstNode(node.expression) ? node.expression : null;
-	const opening = expression === null ? -1 : expression.start - 1;
+function preserveExponentAssertionGrouping(
+	node: Extract<Node, { type: "TSAsExpression" | "TSSatisfiesExpression" | "TSNonNullExpression" }>,
+	context: TypeEraser,
+): void {
+	const expression = node.expression;
+	const opening = expression.start - 1;
 	const closing = node.end - 1;
 	const openingCharacter = opening >= 0 ? context.sourceFile.text[opening] : undefined;
 	if (
-		expression === null ||
 		openingCharacter === undefined ||
 		!isHorizontalWhitespace(openingCharacter) ||
 		closing < expression.end ||
@@ -721,8 +735,12 @@ function binaryPrecedence(operator: string): number | undefined {
 	}
 }
 
-function fixArrowParentheses(node: TypeErasureNode, context: ErasureContext): void {
-	moveOpeningParenthesisAcrossMultilineTypeParameters(node, context);
+function fixArrowParentheses(
+	node: Extract<Node, { type: "ArrowFunctionExpression" }>,
+	walkContext: WalkContext,
+	context: TypeEraser,
+): void {
+	moveOpeningParenthesisAcrossMultilineTypeParameters(node, walkContext, context);
 	moveArrowClosingParenthesisAcrossMultilineReturnType(node, context);
 }
 
@@ -730,13 +748,19 @@ function fixArrowParentheses(node: TypeErasureNode, context: ErasureContext): vo
 // invalid after `async` or `throw`, or changes the parsing of `return` and
 // `yield`. Reuse the existing parameter-list parenthesis so the output keeps
 // the same UTF-16 length and line breaks.
-function moveOpeningParenthesisAcrossMultilineTypeParameters(node: TypeErasureNode, context: ErasureContext): void {
-	const typeParameters = isAstNode(node.typeParameters) ? node.typeParameters : null;
-	if (typeParameters === null || !hasLineSensitiveArrowPrefix(node, typeParameters, context)) {
+function moveOpeningParenthesisAcrossMultilineTypeParameters(
+	node: Extract<Node, { type: "ArrowFunctionExpression" }>,
+	walkContext: WalkContext,
+	context: TypeEraser,
+): void {
+	const typeParameters = node.typeParameters ?? null;
+	if (typeParameters === null || !hasLineSensitiveArrowPrefix(node, typeParameters, walkContext, context)) {
 		return;
 	}
 
-	const opening = requireTokenAtOrAfterByLabel(context.tokens, typeParameters.end, "(");
+	const firstParameter = node.params[0];
+	const openingBoundary = firstParameter?.start ?? earliestNodeStart(node.returnType, node.body, node.end);
+	const opening = requireSourceText(context, typeParameters.end, openingBoundary, "(");
 	if (!containsLineTerminator(context.sourceFile.text, typeParameters.start, opening.start)) {
 		return;
 	}
@@ -745,54 +769,84 @@ function moveOpeningParenthesisAcrossMultilineTypeParameters(node: TypeErasureNo
 	addFixedBlank(context.edits, opening.start, opening.end);
 }
 
-function hasLineSensitiveArrowPrefix(node: TypeErasureNode, typeParameters: AstNode, context: ErasureContext): boolean {
+function hasLineSensitiveArrowPrefix(
+	node: Extract<Node, { type: "ArrowFunctionExpression" }>,
+	typeParameters: Extract<Node, { type: "TSTypeParameterDeclaration" }>,
+	walkContext: WalkContext,
+	context: TypeEraser,
+): boolean {
 	if (node.async === true) {
 		return true;
 	}
 
-	const previous = lastTokenBefore(context.tokens, typeParameters.start);
-	if (previous === undefined || containsLineTerminator(context.sourceFile.text, previous.end, typeParameters.start)) {
+	const parent = walkContext.parent;
+	if (parent === null || !isLineSensitiveArgument(parent, node)) {
 		return false;
 	}
-
-	const prefix = tokenText(context.tokens, previous);
-	return prefix === "return" || prefix === "yield" || prefix === "throw";
+	const keyword = statementArgumentKeyword(parent);
+	if (keyword === undefined) {
+		return false;
+	}
+	const keywordEnd = parent.start + keyword.length;
+	return !containsLineTerminator(context.sourceFile.text, keywordEnd, typeParameters.start);
 }
 
-function moveArrowClosingParenthesisAcrossMultilineReturnType(node: TypeErasureNode, context: ErasureContext): void {
-	if (node.type !== "ArrowFunctionExpression") {
-		return;
+function isLineSensitiveArgument(parent: Node, node: Node): boolean {
+	return (
+		(parent.type === "ReturnStatement" || parent.type === "ThrowStatement" || parent.type === "YieldExpression") &&
+		parent.argument === node
+	);
+}
+
+function statementArgumentKeyword(node: Node): "return" | "throw" | "yield" | undefined {
+	if (node.type === "ReturnStatement") {
+		return "return";
 	}
-	const returnType = isAstNode(node.returnType) ? node.returnType : null;
-	const body = isAstNode(node.body) ? node.body : null;
-	if (returnType === null || body === null) {
+	if (node.type === "ThrowStatement") {
+		return "throw";
+	}
+	return node.type === "YieldExpression" ? "yield" : undefined;
+}
+
+function moveArrowClosingParenthesisAcrossMultilineReturnType(
+	node: Extract<Node, { type: "ArrowFunctionExpression" }>,
+	context: TypeEraser,
+): void {
+	const returnType = node.returnType ?? null;
+	const body = node.body;
+	if (returnType === null) {
 		return;
 	}
 
-	const beforeReturn = requireLastTokenByLabel(context.tokens, node.start, returnType.start, ")");
-	const arrow = requireTokenByText(context.tokens, returnType.end, body.start, "=>");
+	const beforeReturn = requireSourceText(context, node.start, returnType.start, ")", "backward");
+	const arrow = requireSourceText(context, returnType.end, body.start, "=>");
 	if (!containsLineTerminator(context.sourceFile.text, beforeReturn.end, arrow.start)) {
 		return;
 	}
 
-	const lastTypeToken = requireLastTokenInRange(context.tokens, returnType.start, returnType.end);
+	const lastTypeEnd = previousSyntaxEnd(context.sourceFile.gaps, returnType.start, returnType.end);
+	if (lastTypeEnd === undefined) {
+		throw new Error(
+			`Internal parser invariant: expected return type syntax in [${returnType.start}, ${returnType.end})`,
+		);
+	}
 
 	addFixedBlank(context.edits, beforeReturn.start, beforeReturn.end);
-	addFixedSubstitution(context.edits, lastTypeToken.end - 1, ")");
+	addFixedSubstitution(context.edits, lastTypeEnd - 1, ")");
 }
 
-function eraseRequiredKeyword(start: number, end: number, keyword: string, context: ErasureContext): number {
-	const token = requireTokenByText(context.tokens, start, end, keyword);
+function eraseRequiredKeyword(start: number, end: number, keyword: string, context: TypeEraser): number {
+	const token = requireSourceText(context, start, end, keyword);
 	addFixedBlank(context.edits, token.start, token.end);
 	return token.start;
 }
 
-function eraseRequiredPunctuation(start: number, end: number, punctuation: string, context: ErasureContext): void {
-	const token = requireTokenByText(context.tokens, start, end, punctuation);
+function eraseRequiredPunctuation(start: number, end: number, punctuation: string, context: TypeEraser): void {
+	const token = requireSourceText(context, start, end, punctuation);
 	addFixedBlank(context.edits, token.start, token.end);
 }
 
-function isWholeTypeOnlyExport(node: TypeErasureNode): boolean {
+function isWholeTypeOnlyExport(node: Node): boolean {
 	if (node.type !== "ExportNamedDeclaration" && node.type !== "ExportDefaultDeclaration") {
 		return false;
 	}
@@ -801,61 +855,99 @@ function isWholeTypeOnlyExport(node: TypeErasureNode): boolean {
 	}
 	const declaration = node.declaration;
 	return (
-		isAstNode(declaration) &&
+		declaration !== null &&
 		(WHOLE_TYPE_DECLARATIONS.has(declaration.type) ||
 			isDeclareRuntimeDeclaration(declaration) ||
+			(declaration.type === "TSImportEqualsDeclaration" && declaration.importKind === "type") ||
 			(declaration.type === "TSModuleDeclaration" && isTypeOnlyModule(declaration)))
 	);
 }
 
-function isDeclareRuntimeDeclaration(node: TypeErasureNode): boolean {
-	if (node.declare !== true) {
-		return false;
-	}
+function isDeclareRuntimeDeclaration(node: Node): boolean {
 	return (
-		node.type === "ClassDeclaration" || node.type === "FunctionDeclaration" || node.type === "VariableDeclaration"
+		(node.type === "ClassDeclaration" ||
+			node.type === "FunctionDeclaration" ||
+			node.type === "VariableDeclaration") &&
+		node.declare === true
 	);
 }
 
-function isDeclareMethod(node: TypeErasureNode): boolean {
-	const value = node.value;
-	if (!isAstNode(value)) {
-		return false;
-	}
-	return value.type === "TSDeclareMethod" || (value as TypeErasureNode).body === null;
+function isDeclareMethod(node: Extract<Node, { type: "MethodDefinition" }>): boolean {
+	return node.value.body === null;
 }
 
-function parameterRuntimeStart(node: TypeErasureNode, context: ErasureContext): number {
-	if (node.type === "AssignmentPattern" && isAstNode(node.left)) {
+function parameterRuntimeStart(node: Node, context: TypeEraser): number {
+	if (node.type === "AssignmentPattern") {
 		return parameterRuntimeStart(node.left, context);
 	}
-	if (node.type === "RestElement" && isAstNode(node.argument)) {
+	if (node.type === "RestElement") {
 		return parameterRuntimeStart(node.argument, context);
 	}
 	return node.type === "Identifier" ? node.start : runtimeNameEnd(node, context);
 }
 
-function runtimeNameEnd(node: AstNode, context: ErasureContext): number {
-	if (node.type === "Identifier" || node.type === "PrivateIdentifier") {
-		return tokenNameEnd(context.tokens, node);
+function runtimeNameEnd(node: Node, context: TypeEraser): number {
+	if (node.type === "Identifier") {
+		const typeAnnotation = node.typeAnnotation ?? null;
+		const boundary = typeAnnotation?.start ?? node.end;
+		if (node.optional === true) {
+			const optional = requireSourceText(context, node.start, boundary, "?", "backward");
+			const nameEnd = previousSyntaxEnd(context.sourceFile.gaps, node.start, optional.start);
+			if (nameEnd !== undefined) {
+				return nameEnd;
+			}
+		}
+		return previousSyntaxEnd(context.sourceFile.gaps, node.start, boundary) ?? node.end;
 	}
 	return node.end;
 }
 
-function identifierStart(node: TypeErasureNode): number {
-	if (isAstNode(node.id)) {
-		return node.id.start;
+function requireSourceText(
+	context: TypeEraser,
+	start: number,
+	end: number,
+	text: string,
+	direction: "forward" | "backward" = "forward",
+): SourceSpan {
+	const span = findSourceText(context.sourceFile.gaps, start, end, text, direction);
+	if (span === undefined) {
+		throw new Error(`Internal parser invariant: expected ${JSON.stringify(text)} in [${start}, ${end})`);
 	}
-	if (isAstNode(node.key)) {
-		return node.key.start;
-	}
-	if (isAstNode(node.parameter)) {
-		return node.parameter.start;
-	}
-	return node.end;
+	return span;
 }
 
-function modifierStart(node: TypeErasureNode): number {
+function identifierStart(
+	node: Extract<
+		Node,
+		{
+			type:
+				| "ClassDeclaration"
+				| "ClassExpression"
+				| "PropertyDefinition"
+				| "AccessorProperty"
+				| "MethodDefinition";
+		}
+	>,
+): number {
+	if (node.type === "ClassDeclaration" || node.type === "ClassExpression") {
+		return node.id?.start ?? node.body.start;
+	}
+	return node.key.start;
+}
+
+function modifierStart(
+	node: Extract<
+		Node,
+		{
+			type:
+				| "ClassDeclaration"
+				| "ClassExpression"
+				| "PropertyDefinition"
+				| "AccessorProperty"
+				| "MethodDefinition";
+		}
+	>,
+): number {
 	const decorators = node.decorators;
 	if (!Array.isArray(decorators) || decorators.length === 0) {
 		return node.start;
@@ -864,13 +956,13 @@ function modifierStart(node: TypeErasureNode): number {
 	return lastDecorator === undefined ? node.start : lastDecorator.end;
 }
 
-function earliestNodeStart(...values: unknown[]): number {
+function earliestNodeStart(...values: readonly (Node | number | null | undefined)[]): number {
 	let result = Number.POSITIVE_INFINITY;
 	for (const value of values) {
-		if (isAstNode(value)) {
-			result = Math.min(result, value.start);
-		} else if (typeof value === "number") {
+		if (typeof value === "number") {
 			result = Math.min(result, value);
+		} else if (value !== null && value !== undefined) {
+			result = Math.min(result, value.start);
 		}
 	}
 	return result;

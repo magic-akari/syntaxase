@@ -1,4 +1,4 @@
-import { type AstNode, type TsImportEqualsDeclaration } from "../ast.ts";
+import type { ExportNamedDeclaration, Node, TSImportEqualsDeclaration } from "@yuku-parser/wasm";
 import {
 	appendGenerated,
 	appendOriginal,
@@ -7,28 +7,31 @@ import {
 	type EditFragment,
 } from "../edit-fragment.ts";
 import { sourceCommentsInRange, type SourceFile } from "../source-file.ts";
-import { requireTokenByText } from "../token-index.ts";
 import { addRuntimeReplacement, type EditTree } from "../edit-tree.ts";
 import { syntaxErrorAt } from "../errors.ts";
 import { nearestRuntimeNamespace } from "../namespace-semantics.ts";
 
 export interface ImportEqualsFeatureTask {
 	readonly kind: "import-equals";
-	readonly node: TsImportEqualsDeclaration;
+	readonly node: TSImportEqualsDeclaration;
+	readonly exportWrapper: ExportNamedDeclaration | null;
 	readonly exportedFromNamespace: boolean;
 }
 
 export function collectImportEqualsFeature(
-	node: TsImportEqualsDeclaration,
-	ancestors: readonly AstNode[],
+	node: TSImportEqualsDeclaration,
+	parent: Node | null,
+	ancestors: readonly Node[],
 ): ImportEqualsFeatureTask | null {
 	if (node.importKind === "type") {
 		return null;
 	}
+	const exportWrapper = parent?.type === "ExportNamedDeclaration" && parent.declaration === node ? parent : null;
 	return {
 		kind: "import-equals",
 		node,
-		exportedFromNamespace: node.isExport === true && nearestRuntimeNamespace(ancestors) !== null,
+		exportWrapper,
+		exportedFromNamespace: exportWrapper !== null && nearestRuntimeNamespace(ancestors) !== null,
 	};
 }
 
@@ -41,30 +44,28 @@ export function lowerImportEquals(
 	if (task.exportedFromNamespace) {
 		throw syntaxErrorAt(node, "Exported namespace import aliases are not supported");
 	}
-	const replacement = emitImportEquals(node, sourceFile);
-	addRuntimeReplacement(edits, node.start, node.end, replacement);
+	const replacement = emitImportEquals(task, sourceFile);
+	const replacementNode = task.exportWrapper ?? node;
+	addRuntimeReplacement(edits, replacementNode.start, replacementNode.end, replacement);
 }
 
-function emitImportEquals(node: TsImportEqualsDeclaration, sourceFile: SourceFile): EditFragment {
+function emitImportEquals(task: ImportEqualsFeatureTask, sourceFile: SourceFile): EditFragment {
+	const node = task.node;
 	const id = node.id;
 	const moduleReference = node.moduleReference;
-	const beforeNameComments = sourceCommentsInRange(sourceFile, node.start, id.start);
+	const sourceStart = task.exportWrapper?.start ?? node.start;
+	const beforeNameComments = sourceCommentsInRange(sourceFile, sourceStart, id.start);
 	const comments = sourceCommentsInRange(sourceFile, id.end, moduleReference.start);
 	const trailingComments = sourceCommentsInRange(sourceFile, moduleReference.end, node.end);
-	const prefix = node.isExport === true ? "export " : "";
+	const prefix = task.exportWrapper === null ? "" : "export ";
 	const result = createEditFragment();
 	appendGenerated(result, `${beforeNameComments}${prefix}const  `);
 	appendOriginal(result, id.start, id.end);
 	appendGenerated(result, ` = ${comments}`);
 	if (moduleReference.type === "TSExternalModuleReference") {
-		const requireToken = requireTokenByText(
-			sourceFile.tokenIndex,
-			moduleReference.start,
-			moduleReference.end,
-			"require",
-		);
+		const requireEnd = moduleReference.start + "require".length;
 		appendGenerated(result, "import.sync");
-		appendOriginal(result, requireToken.end, moduleReference.end);
+		appendOriginal(result, requireEnd, moduleReference.end);
 	} else {
 		appendOriginal(result, moduleReference.start, moduleReference.end);
 	}

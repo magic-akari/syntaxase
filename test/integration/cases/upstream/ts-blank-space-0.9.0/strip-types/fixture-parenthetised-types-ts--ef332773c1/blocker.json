@@ -1,0 +1,4 @@
+{
+	"kind": "error",
+	"error": "SyntaxError: 'void' is reserved and cannot be used as a binding identifier\n"
+}

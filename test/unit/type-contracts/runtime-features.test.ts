@@ -1,8 +1,10 @@
 import {
 	createRuntimeFeatureCollection,
+	collectRuntimeFeatureNode,
 	lowerRuntimeFeatures,
-	runtimeFeatureVisitors,
 } from "../../../internal/runtime-transformer.ts";
+import type { Node } from "@yuku-parser/wasm";
+import type { WalkContext } from "yuku-ast";
 import {
 	lowerNamespaceFeature,
 	type NamespaceFeatureTask,
@@ -15,6 +17,8 @@ declare const namespaceTask: NamespaceFeatureTask;
 declare const namespaceLowerer: NamespaceLowerer;
 declare const editTree: EditTree<"runtime">;
 declare const sourceFile: SourceFile;
+declare const node: Node;
+declare const walkContext: WalkContext;
 
 lowerNamespaceFeature(namespaceLowerer, namespaceTask);
 
@@ -25,7 +29,7 @@ namespaceTask.ancestors;
 lowerNamespaceFeature(editTree, namespaceTask);
 
 const features = createRuntimeFeatureCollection({ jsx: null });
-runtimeFeatureVisitors(features);
+collectRuntimeFeatureNode(node, walkContext, features);
 lowerRuntimeFeatures(sourceFile, editTree, features);
 
 // @ts-expect-error Runtime lowering consumes collected features, not transform options.

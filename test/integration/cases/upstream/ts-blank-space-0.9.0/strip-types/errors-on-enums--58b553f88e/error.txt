@@ -1,1 +1,1 @@
-SyntaxError: TypeScript enum requires runtime lowering (2:7)
+SyntaxError: TypeScript enum requires runtime lowering

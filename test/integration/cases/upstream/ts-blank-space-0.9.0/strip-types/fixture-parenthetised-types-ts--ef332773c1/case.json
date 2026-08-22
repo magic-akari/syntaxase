@@ -30,5 +30,10 @@
 				"whole-file"
 			]
 		}
-	]
+	],
+	"blocker": {
+		"dependency": "@yuku-parser/wasm",
+		"expected": "output",
+		"reason": "Yuku reports diagnostics for parenthesized arrow-function return types in this fixture"
+	}
 }

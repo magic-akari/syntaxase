@@ -7,16 +7,21 @@ import { pathToFileURL } from "node:url";
 export function implementationIdentity(modulePath) {
 	const rootDirectory = path.dirname(modulePath);
 	const requireFromImplementation = createRequire(pathToFileURL(modulePath));
-	const acornEntry = requireFromImplementation.resolve("acorn");
-	const acornTypeScriptEntry = requireFromImplementation.resolve("@sveltejs/acorn-typescript");
+	const packageJsonPath = path.join(rootDirectory, "package.json");
+	const packageJson = readJsonFile(packageJsonPath);
+	const dependencies = Object.fromEntries(
+		Object.keys(packageJson?.dependencies ?? {})
+			.sort()
+			.map((name) => {
+				const entry = requireFromImplementation.resolve(name);
+				return [name, fileIdentity(entry)];
+			}),
+	);
 	return {
 		runtimeSha256: runtimeFingerprint(rootDirectory),
-		packageJsonSha256: optionalFileFingerprint(path.join(rootDirectory, "package.json")),
+		packageJsonSha256: optionalFileFingerprint(packageJsonPath),
 		packageLockSha256: optionalFileFingerprint(path.join(rootDirectory, "package-lock.json")),
-		dependencies: {
-			acorn: fileIdentity(acornEntry),
-			acornTypeScript: fileIdentity(acornTypeScriptEntry),
-		},
+		dependencies,
 	};
 }
 
@@ -63,6 +68,13 @@ function optionalFileFingerprint(filePath) {
 		return null;
 	}
 	return fileFingerprint(filePath);
+}
+
+function readJsonFile(filePath) {
+	if (!existsSync(filePath)) {
+		return null;
+	}
+	return JSON.parse(readFileSync(filePath, "utf8"));
 }
 
 function fileIdentity(filePath) {

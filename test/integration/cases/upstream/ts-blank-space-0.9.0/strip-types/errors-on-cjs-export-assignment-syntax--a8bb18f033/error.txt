@@ -1,1 +1,1 @@
-SyntaxError: TypeScript export assignment requires runtime lowering (2:8)
+SyntaxError: TypeScript export assignment requires runtime lowering

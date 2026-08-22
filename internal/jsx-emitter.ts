@@ -1,9 +1,18 @@
-import type { AstNode } from "./ast.ts";
+import type {
+	JSXAttributeValue,
+	JSXElement,
+	JSXElementName,
+	JSXFragment,
+	JSXMemberExpression,
+	JSXOpeningElement,
+	Node,
+} from "@yuku-parser/wasm";
 import { syntaxErrorAt } from "./errors.ts";
 import { isIdentifierName, isIdentifierReference } from "./identifiers.ts";
 import { jsStringLiteral } from "./js-string.ts";
 import { jsxConfigRuntimeIdentifierNames, type ResolvedJSXConfig } from "./jsx-config.ts";
 import { isIntrinsicJsxName } from "./jsx-names.ts";
+import { decodeJsxEntities } from "./jsx-entities.ts";
 import {
 	claimSuffixedRuntimeName,
 	reserveRuntimeName,
@@ -27,23 +36,7 @@ type AutomaticJSXConfig = Extract<ResolvedJSXConfig, { runtime: "automatic" }>;
 type ClassicJSXConfig = Extract<ResolvedJSXConfig, { runtime: "classic" }>;
 type LoweredJSXConfig = AutomaticJSXConfig | ClassicJSXConfig;
 
-/** Parser fields consumed by JSX classification and emission. */
-export interface JsxSyntaxNode extends AstNode {
-	readonly argument?: AstNode;
-	readonly attributes?: readonly JsxSyntaxNode[];
-	readonly children?: readonly JsxSyntaxNode[];
-	readonly expression?: AstNode;
-	readonly name?: string | JsxSyntaxNode;
-	readonly namespace?: JsxSyntaxNode;
-	readonly object?: JsxSyntaxNode;
-	readonly openingElement?: JsxSyntaxNode;
-	readonly property?: JsxSyntaxNode;
-	readonly value?: unknown;
-}
-
-export interface LowerableJsxNode extends JsxSyntaxNode {
-	readonly type: "JSXElement" | "JSXFragment";
-}
+export type LowerableJsxNode = JSXElement | JSXFragment;
 
 export interface RuntimeImport {
 	readonly imported: string;
@@ -129,7 +122,7 @@ export function jsxRuntimeImports(context: JsxEmitterContext): RuntimeImport[] {
 	return [...state.runtimeImports.values()].sort(compareRuntimeImports);
 }
 
-function emitJsxExpression(context: JsxEmitterContext, node: AstNode): EditFragment {
+function emitJsxExpression(context: JsxEmitterContext, node: Node): EditFragment {
 	if (isJsxNode(node)) {
 		return emitJsx(context, node);
 	}
@@ -138,9 +131,7 @@ function emitJsxExpression(context: JsxEmitterContext, node: AstNode): EditFragm
 	const candidates = outermostNodesWithin(state.jsxNodes, node.start, node.end);
 	const nested: LowerableJsxNode[] = [];
 	for (const candidate of candidates) {
-		if (candidate !== node) {
-			nested.push(candidate);
-		}
+		nested.push(candidate);
 	}
 	if (nested.length === 0) {
 		return emitPlainRange(context, node.start, node.end);
@@ -171,7 +162,7 @@ function emitPlainRange(_context: JsxEmitterContext, start: number, end: number)
 	return finishEditFragment(result);
 }
 
-function emitSingleExpression(context: JsxEmitterContext, node: AstNode): EditFragment {
+function emitSingleExpression(context: JsxEmitterContext, node: Node): EditFragment {
 	const content = emitJsxExpression(context, node);
 	if (node.type !== "SequenceExpression") {
 		return content;
@@ -198,12 +189,8 @@ function emitClassic(context: JsxEmitterContext, node: LowerableJsxNode, config:
 			children.values,
 		);
 	}
-	if (node.type !== "JSXElement") {
-		throw syntaxErrorAt(node, `Unsupported JSX node ${node.type}`);
-	}
-
-	const opening = node.openingElement!;
-	const type = emitElementType(opening.name as JsxSyntaxNode, state.baseCode);
+	const opening = node.openingElement;
+	const type = emitElementType(opening.name, state.baseCode);
 	const attributes = emitAttributes(context, opening);
 	const trailingComments = `${attributes.trailingComments}${children.commentsAfterProperties}`;
 	const properties = emitClassicProperties(attributes.entries, trailingComments);
@@ -226,12 +213,8 @@ function emitAutomatic(context: JsxEmitterContext, node: LowerableJsxNode, confi
 		const properties = emitAutomaticProperties([], children, "");
 		return emitAutomaticCall(context, node, type, properties, null, children, config);
 	}
-	if (node.type !== "JSXElement") {
-		throw syntaxErrorAt(node, `Unsupported JSX node ${node.type}`);
-	}
-
-	const opening = node.openingElement!;
-	const type = emitElementType(opening.name as JsxSyntaxNode, state.baseCode);
+	const opening = node.openingElement;
+	const type = emitElementType(opening.name, state.baseCode);
 	const attributes = emitAttributes(context, opening);
 	if (attributes.hasKeyAfterSpread) {
 		const trailingComments = `${attributes.trailingComments}${children.commentsAfterProperties}`;
@@ -259,7 +242,7 @@ function emitAutomatic(context: JsxEmitterContext, node: LowerableJsxNode, confi
 
 function emitAutomaticCall(
 	context: JsxEmitterContext,
-	node: AstNode,
+	node: Node,
 	type: EditFragment,
 	properties: EditFragment,
 	key: EditFragment | null,
@@ -332,11 +315,11 @@ function automaticRuntimeSource(config: AutomaticJSXConfig): string {
 	return `${config.importSource}/${suffix}`;
 }
 
-function emitAttributes(context: JsxEmitterContext, opening: JsxSyntaxNode): EmittedAttributes {
+function emitAttributes(context: JsxEmitterContext, opening: JSXOpeningElement): EmittedAttributes {
 	const state = context[jsxEmitterState];
 	const attributes = opening.attributes ?? [];
 	const entries: EmittedAttribute[] = [];
-	const name = opening.name as JsxSyntaxNode;
+	const name = opening.name;
 	let cursor = name.end;
 	let hasSpread = false;
 	let hasKeyAfterSpread = false;
@@ -345,7 +328,7 @@ function emitAttributes(context: JsxEmitterContext, opening: JsxSyntaxNode): Emi
 	for (const attribute of attributes) {
 		const leadingComments = commentsBetween(context, cursor, attribute.start);
 		if (attribute.type === "JSXSpreadAttribute") {
-			const argument = attribute.argument!;
+			const argument = attribute.argument;
 			const insideLeading = commentsBetween(context, attribute.start, argument.start);
 			const insideTrailing = commentsBetween(context, argument.end, attribute.end);
 			const property = createEditFragment();
@@ -362,11 +345,7 @@ function emitAttributes(context: JsxEmitterContext, opening: JsxSyntaxNode): Emi
 			cursor = attribute.end;
 			continue;
 		}
-		if (attribute.type !== "JSXAttribute") {
-			throw syntaxErrorAt(attribute, `Unsupported JSX attribute ${attribute.type}`);
-		}
-
-		const attributeName = jsxNameText(attribute.name as JsxSyntaxNode, state.baseCode);
+		const attributeName = jsxNameText(attribute.name, state.baseCode);
 		const value = emitAttributeValue(context, attribute.value);
 		const property = createEditFragment();
 		appendGenerated(property, `${leadingComments}${jsStringLiteral(attributeName)}: `);
@@ -395,20 +374,20 @@ function emitAttributes(context: JsxEmitterContext, opening: JsxSyntaxNode): Emi
 	};
 }
 
-function emitAttributeValue(context: JsxEmitterContext, value: unknown): EditFragment {
-	if (value === null || value === undefined) {
+function emitAttributeValue(context: JsxEmitterContext, value: JSXAttributeValue | null): EditFragment {
+	if (value === null) {
 		return generatedEditFragment("true");
 	}
-	const node = value as JsxSyntaxNode;
+	const node = value;
 	if (node.type === "Literal") {
 		const text =
 			typeof node.value === "string"
-				? jsStringLiteral(normalizeJsxAttributeString(node.value))
+				? jsStringLiteral(normalizeJsxAttributeString(decodeJsxEntities(node.value)))
 				: JSON.stringify(node.value);
 		return generatedEditFragment(text);
 	}
 	if (node.type === "JSXExpressionContainer") {
-		const expression = node.expression!;
+		const expression = node.expression;
 		if (expression.type === "JSXEmptyExpression") {
 			return generatedEditFragment("undefined");
 		}
@@ -423,10 +402,10 @@ function emitAttributeValue(context: JsxEmitterContext, value: unknown): EditFra
 	if (isJsxNode(node)) {
 		return emitJsx(context, node);
 	}
-	throw syntaxErrorAt(node, `Unsupported JSX attribute value ${node.type}`);
+	return node;
 }
 
-function emitChildren(context: JsxEmitterContext, node: JsxSyntaxNode): EmittedChildren {
+function emitChildren(context: JsxEmitterContext, node: LowerableJsxNode): EmittedChildren {
 	const state = context[jsxEmitterState];
 	const children = node.children ?? [];
 	const emitted: EmittedChild[] = [];
@@ -434,7 +413,7 @@ function emitChildren(context: JsxEmitterContext, node: JsxSyntaxNode): EmittedC
 
 	for (const child of children) {
 		if (child.type === "JSXText") {
-			const text = cleanJsxText(String(child.value ?? ""));
+			const text = cleanJsxText(decodeJsxEntities(child.value));
 			if (text !== "") {
 				emitted.push({
 					content: generatedEditFragment(jsStringLiteral(text)),
@@ -444,7 +423,7 @@ function emitChildren(context: JsxEmitterContext, node: JsxSyntaxNode): EmittedC
 			continue;
 		}
 		if (child.type === "JSXExpressionContainer") {
-			const expression = child.expression!;
+			const expression = child.expression;
 			if (expression.type === "JSXEmptyExpression") {
 				const comment = state.baseCode.slice(expression.start, expression.end);
 				if (comment.trim() !== "") {
@@ -470,7 +449,7 @@ function emitChildren(context: JsxEmitterContext, node: JsxSyntaxNode): EmittedC
 			continue;
 		}
 		if (child.type === "JSXSpreadChild") {
-			const expression = child.expression!;
+			const expression = child.expression;
 			emitted.push({
 				content: emitChildExpression(context, child, expression),
 				isSpread: true,
@@ -481,12 +460,12 @@ function emitChildren(context: JsxEmitterContext, node: JsxSyntaxNode): EmittedC
 			emitted.push({ content: emitJsx(context, child), isSpread: false });
 			continue;
 		}
-		throw syntaxErrorAt(child, `Unsupported JSX child ${child.type}`);
+		return child;
 	}
 	return { values: emitted, commentsAfterProperties };
 }
 
-function emitChildExpression(context: JsxEmitterContext, container: AstNode, expression: AstNode): EditFragment {
+function emitChildExpression(context: JsxEmitterContext, container: Node, expression: Node): EditFragment {
 	const leading = commentsBetween(context, container.start, expression.start);
 	const trailing = commentsBetween(context, expression.end, container.end);
 	const result = createEditFragment();
@@ -570,7 +549,7 @@ function emitObject(properties: readonly EditFragment[], trailingComments: strin
 }
 
 function emitCreateElement(
-	node: AstNode,
+	node: Node,
 	isLineHead: boolean,
 	factory: string,
 	type: EditFragment,
@@ -596,9 +575,9 @@ function emitCreateElement(
 	return finishEditFragment(result);
 }
 
-function emitElementType(node: JsxSyntaxNode, source: string): EditFragment {
+function emitElementType(node: JSXElementName, source: string): EditFragment {
 	if (node.type === "JSXIdentifier") {
-		const name = String(node.name);
+		const name = node.name;
 		if (name === "this") {
 			return originalContent(node.start, node.end);
 		}
@@ -610,21 +589,18 @@ function emitElementType(node: JsxSyntaxNode, source: string): EditFragment {
 	if (node.type === "JSXMemberExpression") {
 		return emitMemberElementType(node);
 	}
-	if (node.type === "JSXNamespacedName") {
-		return emitStringElementType(jsxNameText(node, source));
-	}
-	throw syntaxErrorAt(node, `Unsupported JSX element name ${node.type}`);
+	return emitStringElementType(jsxNameText(node, source));
 }
 
-function emitMemberElementType(node: JsxSyntaxNode): EditFragment {
-	const object = node.object!;
-	const property = node.property!;
+function emitMemberElementType(node: JSXMemberExpression): EditFragment {
+	const object = node.object;
+	const property = node.property;
 	const result = createEditFragment();
 
 	if (object.type === "JSXMemberExpression") {
 		appendEditFragment(result, emitMemberElementType(object));
 	} else if (object.type === "JSXIdentifier") {
-		const name = String(object.name);
+		const name = object.name;
 		if (name !== "this" && !isIdentifierReference(name)) {
 			throw syntaxErrorAt(object, "JSX member root must be a JavaScript identifier or this");
 		}
@@ -633,7 +609,7 @@ function emitMemberElementType(node: JsxSyntaxNode): EditFragment {
 		throw syntaxErrorAt(object, "JSX namespace names cannot be used as member roots");
 	}
 
-	if (property.type !== "JSXIdentifier" || !isIdentifierName(String(property.name))) {
+	if (!isIdentifierName(property.name)) {
 		throw syntaxErrorAt(property, "JSX member property must be a JavaScript identifier name");
 	}
 	appendOriginal(result, object.end, node.end);
@@ -650,13 +626,13 @@ function originalContent(start: number, end: number): EditFragment {
 	return finishEditFragment(result);
 }
 
-function jsxNameText(node: JsxSyntaxNode, source: string): string {
+function jsxNameText(node: JSXElementName, source: string): string {
 	if (node.type === "JSXIdentifier") {
-		return String(node.name);
+		return node.name;
 	}
 	if (node.type === "JSXNamespacedName") {
-		const namespace = jsxNameText(node.namespace!, source);
-		const name = jsxNameText(node.name as JsxSyntaxNode, source);
+		const namespace = jsxNameText(node.namespace, source);
+		const name = jsxNameText(node.name, source);
 		return `${namespace}:${name}`;
 	}
 	return source.slice(node.start, node.end);
@@ -714,7 +690,7 @@ function isJavaScriptWhitespace(character: string | undefined): boolean {
 	return character !== undefined && character.trim() === "";
 }
 
-function collectJsxLineHeads(lines: SourceLayout, nodes: readonly AstNode[]): Set<number> {
+function collectJsxLineHeads(lines: SourceLayout, nodes: readonly Node[]): Set<number> {
 	const lineHeads = new Set<number>();
 	let lineIndex = 0;
 	let previousLine = -1;
@@ -767,7 +743,7 @@ function jsxNodeIndexAtOrAfter(nodes: readonly LowerableJsxNode[], offset: numbe
 	return low;
 }
 
-function compareJsxNodeOrder(left: AstNode, right: AstNode): number {
+function compareJsxNodeOrder(left: Node, right: Node): number {
 	return left.start - right.start || right.end - left.end;
 }
 
@@ -807,6 +783,6 @@ function compareCodeUnits(left: string, right: string): number {
 	return 0;
 }
 
-export function isJsxNode(node: AstNode): node is LowerableJsxNode {
+export function isJsxNode(node: Node): node is LowerableJsxNode {
 	return node.type === "JSXElement" || node.type === "JSXFragment";
 }

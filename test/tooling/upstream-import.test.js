@@ -18,7 +18,7 @@ const repositoryConfigPath = fileURLToPath(new URL("../integration/upstream/conf
 
 test("committed upstream catalogs validate without upstream checkouts", async () => {
 	assert.deepEqual(await validateGeneratedCatalogs({ configPath: repositoryConfigPath, root: repositoryRoot }), {
-		blocked: 6,
+		blocked: 4,
 		cases: 361,
 		excluded: 5,
 		projects: 3,

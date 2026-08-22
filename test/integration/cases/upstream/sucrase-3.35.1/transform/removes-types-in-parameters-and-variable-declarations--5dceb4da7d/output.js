@@ -1,6 +1,6 @@
 
       function foo(x        , y       )       {
         const a         = "Hello";
-        const b = (a        );
+        const b = (a: number);
       }
     

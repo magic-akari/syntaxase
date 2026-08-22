@@ -1,1 +1,1 @@
-SyntaxError: Runtime TypeScript namespace/module is not supported (4:8)
+SyntaxError: Runtime TypeScript namespace/module is not supported

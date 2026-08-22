@@ -31,7 +31,7 @@ The pipeline is:
 
 ```text
 parse SourceFile once
-  -> one shared AST traversal
+  -> one native Yuku AST traversal
        -> erase fixed-width TypeScript
        -> collect runtime features and names when transforming
   -> seal EditTree fixed phase
@@ -39,12 +39,11 @@ parse SourceFile once
   -> render JavaScript
 ```
 
-- `parser.ts` creates the parser-owned `SourceFile`.
-- `internal/source-file.ts` owns source, the opaque token index, comments, and
-  the shared physical-line layout.
-- `internal/ast.ts` types shared node identity and cross-module task nodes;
-  feature modules own zero-runtime structural views, while
-  `internal/ast-walker.ts` owns automatic structural recursion.
+- `parser.ts` parses with `@yuku-parser/wasm` and creates the `SourceFile`.
+- `internal/source-file.ts` owns source, Yuku comments, the opaque source-gap
+  cursor, and the shared physical-line layout.
+- Feature modules use Yuku's `Node` union and concrete node types directly;
+  `yuku-ast.walk` owns schema-driven traversal.
 - `internal/type-eraser.ts` owns position-preserving erasure.
 - `internal/runtime-transformer.ts` only routes syntax nodes and dispatches
   source-ordered feature tasks.
@@ -59,11 +58,11 @@ lowerer. Shared classifications belong in a shared module, not as duplicated
 feature tests. Do not build a semantic model until a concrete lowering consumes
 it.
 
-Treat the configured parser as authoritative. Do not preprocess source, patch
-dependency behavior, reflectively walk the AST in a feature, or add token
-fallbacks for a parser gap. Use required token locators when an AST discriminant
-proves the token exists, and optional locators only when absence is valid. Record
-a dependency blocker for missing parser syntax. Internal invariants are
+Treat Yuku as authoritative. Do not preprocess source, normalize or adapt its
+AST, patch dependency behavior, reflectively walk nodes, or add a token stream
+for a parser gap. Use bounded required source-gap queries when a Yuku
+discriminant proves punctuation exists, and optional queries only when absence
+is valid. Record a dependency blocker for missing parser syntax. Internal invariants are
 protected with type contracts, focused invariant tests, and integration cases rather
 than production validation passes.
 

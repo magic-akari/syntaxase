@@ -1,1 +1,0 @@
-SyntaxError: Unexpected token (2:26)

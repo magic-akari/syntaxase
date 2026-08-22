@@ -36,10 +36,5 @@
 			"development": true,
 			"runtime": "classic"
 		}
-	},
-	"blocker": {
-		"dependency": "@sveltejs/acorn-typescript",
-		"expected": "output",
-		"issue": "https://github.com/sveltejs/acorn-typescript/issues/89"
 	}
 }

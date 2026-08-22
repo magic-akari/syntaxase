@@ -63,35 +63,7 @@
 					"reason": "Sucrase token API"
 				}
 			],
-			"blockers": [
-				{
-					"dependency": "@sveltejs/acorn-typescript",
-					"expected": "output",
-					"issue": "https://github.com/sveltejs/acorn-typescript/issues/89",
-					"match": {
-						"sourcePath": "test/typescript-test.ts",
-						"title": "allows and removes the override keyword on class methods"
-					}
-				},
-				{
-					"dependency": "@sveltejs/acorn-typescript",
-					"expected": "output",
-					"issue": "https://github.com/sveltejs/acorn-typescript/issues/89",
-					"match": {
-						"sourcePath": "test/typescript-test.ts",
-						"title": "allows static index signatures not starting with static"
-					}
-				},
-				{
-					"dependency": "@sveltejs/acorn-typescript",
-					"expected": "output",
-					"issue": "https://github.com/sveltejs/acorn-typescript/issues/89",
-					"match": {
-						"sourcePath": "test/typescript-test.ts",
-						"title": "removes declare fields with disableESTransforms"
-					}
-				}
-			],
+			"blockers": [],
 			"exclusions": []
 		},
 		{
@@ -135,12 +107,21 @@
 					}
 				},
 				{
-					"dependency": "@sveltejs/acorn-typescript",
+					"dependency": "@yuku-parser/wasm",
 					"expected": "output",
-					"reason": "the parser reports a duplicate binding while the upstream blanking fixture is intended to transform",
+					"reason": "Yuku reports diagnostics for TypeScript type arguments in decorator expressions",
 					"match": {
-						"sourcePath": "tests/fixture/cases/asi.ts",
-						"title": "fixture: asi.ts"
+						"sourcePath": "tests/fixture/cases/decorators.ts",
+						"title": "fixture: decorators.ts"
+					}
+				},
+				{
+					"dependency": "@yuku-parser/wasm",
+					"expected": "output",
+					"reason": "Yuku reports diagnostics for parenthesized arrow-function return types in this fixture",
+					"match": {
+						"sourcePath": "tests/fixture/cases/parenthetised-types.ts",
+						"title": "fixture: parenthetised-types.ts"
 					}
 				}
 			],

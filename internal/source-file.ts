@@ -1,27 +1,22 @@
-import type { AstProgram, SyntaxComment, SyntaxToken } from "./ast.ts";
+import type { Comment, Program } from "@yuku-parser/wasm";
+import { createSourceGapCursor, type SourceGapCursor } from "./source-gap.ts";
 import { lineTerminatorAt, scanPhysicalLines, type SourceLayout } from "./source-layout.ts";
-import { createTokenIndex, type TokenIndexState } from "./token-index.ts";
 
 export interface SourceFile {
 	readonly text: string;
-	readonly ast: AstProgram;
-	readonly comments: readonly SyntaxComment[];
+	readonly ast: Program;
+	readonly comments: readonly Comment[];
+	readonly gaps: SourceGapCursor;
 	readonly layout: SourceLayout;
-	readonly tokenIndex: TokenIndexState;
 }
 
-export function createSourceFile(
-	text: string,
-	ast: AstProgram,
-	tokens: readonly SyntaxToken[],
-	comments: readonly SyntaxComment[],
-): SourceFile {
+export function createSourceFile(text: string, ast: Program, comments: readonly Comment[]): SourceFile {
 	return {
 		text,
 		ast,
 		comments,
+		gaps: createSourceGapCursor(text, comments),
 		layout: scanPhysicalLines(text),
-		tokenIndex: createTokenIndex(text, tokens),
 	};
 }
 
@@ -52,7 +47,7 @@ export function sourceCommentsInRange(
 	return result;
 }
 
-function commentIndexAtOrAfter(comments: readonly SyntaxComment[], offset: number): number {
+function commentIndexAtOrAfter(comments: readonly Comment[], offset: number): number {
 	let low = 0;
 	let high = comments.length;
 	while (low < high) {

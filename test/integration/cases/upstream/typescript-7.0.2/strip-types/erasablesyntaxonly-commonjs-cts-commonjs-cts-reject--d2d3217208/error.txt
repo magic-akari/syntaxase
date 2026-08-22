@@ -1,1 +1,1 @@
-SyntaxError: TypeScript import assignment requires runtime lowering (1:0)
+SyntaxError: TypeScript import assignment requires runtime lowering

@@ -1,1 +1,1 @@
-SyntaxError: Comma is not permitted after the rest element (2:26)
+SyntaxError: Rest parameter may not have a trailing comma

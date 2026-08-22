@@ -8,7 +8,7 @@
 	},
 	"adapter": "ts-blank-space@1",
 	"implementationHash": "a9ea76d71a947be874ffefd55279203d22357acf22b21b42ea47b04e2c351e0f",
-	"configHash": "7c94a9eaabf517782d6ddacf670202a8bbcf0d9be6d9f062ce06671e202e0676",
+	"configHash": "824cc710b9cafdc05e4eb641e8b815ea2104b4caee9450e976f4565b5fe96586",
 	"discoveryStats": {
 		"resolved": 61,
 		"sourceCensus": {
@@ -38,7 +38,7 @@
 		"unresolved": 0
 	},
 	"summary": {
-		"blocked": 3,
+		"blocked": 4,
 		"deduplicated": 0,
 		"discovered": 61,
 		"excluded": 1,
@@ -1114,11 +1114,6 @@
 			"target": "test/integration/cases/upstream/ts-blank-space-0.9.0/strip-types/fixture-asi-ts--3d6482a212",
 			"inputFile": "input.ts",
 			"inputSha256": "39d1cfac38de3b55d2cbaad6ea37e438547e706d59012a39f3f2814d4266e1cd",
-			"blocker": {
-				"dependency": "@sveltejs/acorn-typescript",
-				"expected": "output",
-				"reason": "the parser reports a duplicate binding while the upstream blanking fixture is intended to transform"
-			},
 			"oracle": "accept",
 			"origins": [
 				{
@@ -1263,6 +1258,11 @@
 			"target": "test/integration/cases/upstream/ts-blank-space-0.9.0/strip-types/fixture-decorators-ts--6d419bb9aa",
 			"inputFile": "input.ts",
 			"inputSha256": "42bc0bd9e7b5a00c14948305331f186cd6abf29c6dd2347f4535645632d4d649",
+			"blocker": {
+				"dependency": "@yuku-parser/wasm",
+				"expected": "output",
+				"reason": "Yuku reports diagnostics for TypeScript type arguments in decorator expressions"
+			},
 			"oracle": "accept",
 			"origins": [
 				{
@@ -1407,6 +1407,11 @@
 			"target": "test/integration/cases/upstream/ts-blank-space-0.9.0/strip-types/fixture-parenthetised-types-ts--ef332773c1",
 			"inputFile": "input.ts",
 			"inputSha256": "0b6a6d24538da93626be6576b5f4555d5a26c5f2cdf55cfa800b19d0d4e2d823",
+			"blocker": {
+				"dependency": "@yuku-parser/wasm",
+				"expected": "output",
+				"reason": "Yuku reports diagnostics for parenthesized arrow-function return types in this fixture"
+			},
 			"oracle": "accept",
 			"origins": [
 				{

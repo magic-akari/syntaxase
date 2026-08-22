@@ -125,6 +125,8 @@ filename option is needed.
 
 ## Product boundary
 
+Syntaxase parses with Yuku WASM and consumes the native Yuku AST through
+`yuku-ast`; it does not normalize the tree into another parser's shape.
 Syntaxase preserves modern JavaScript and ESM syntax. It does not patch parser
 dependencies, emulate unrelated Babel/Sucrase transforms, provide compatibility
 aliases for pre-release APIs, infer React display names, or generate source
@@ -135,6 +137,7 @@ instead of being recovered with token-level guesses.
 
 Special thanks to [Sucrase](https://github.com/alangpierce/sucrase) and
 [ts-blank-space](https://github.com/bloomberg/ts-blank-space) for the ideas that
-inspired Syntaxase, and to
+inspired Syntaxase; to [Yuku](https://github.com/yuku-toolchain/yuku) for serving
+as the project's foundation; and to
 [@sveltejs/acorn-typescript](https://github.com/sveltejs/acorn-typescript), which
 powered the original prototype.

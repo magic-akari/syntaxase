@@ -1,0 +1,4 @@
+{
+	"kind": "error",
+	"error": "SyntaxError: Expected 'class' keyword, but found 'declare'\n"
+}

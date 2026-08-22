@@ -1,4 +1,0 @@
-{
-	"kind": "error",
-	"error": "SyntaxError: 'public' modifier must precede 'override' modifier. (2:16)\n"
-}

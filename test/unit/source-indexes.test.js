@@ -1,30 +1,35 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { findSourceText, previousSyntaxEnd } from "../../internal/source-gap.js";
 import { sourceCommentsInRange } from "../../internal/source-file.js";
-import { findTokenByText, requireLastTokenByText, requireTokenByText } from "../../internal/token-index.js";
 import { parseTypeScript } from "../../parser.js";
 
-test("SourceFile owns one token index and one physical-line layout", () => {
+test("SourceFile owns source gaps and one physical-line layout", () => {
 	const sourceFile = parseTypeScript("const value: number = 1;\n", false);
 
 	assert.equal("tokens" in sourceFile, false);
+	assert.equal("tokenIndex" in sourceFile, false);
+	assert.ok(sourceFile.gaps);
 	assert.equal(sourceFile.layout.length, 2);
 	assert.equal(sourceFile.layout[0].terminator, "\n");
 });
 
-test("optional and required token queries have distinct missing-token semantics", () => {
-	const source = "class Value extends Base.implements implements First, Second {}";
+test("source-gap queries use bounded spans and ignore comments", () => {
+	const source = "class Value /* implements */ implements First {}";
 	const sourceFile = parseTypeScript(source, false);
 	const firstStart = source.indexOf("First");
-	const lastImplements = requireLastTokenByText(sourceFile.tokenIndex, 0, firstStart, "implements");
+	const actualImplements = findSourceText(sourceFile.gaps, 0, firstStart, "implements", "backward");
 
-	assert.equal(lastImplements.start, source.lastIndexOf("implements", firstStart));
-	assert.equal(findTokenByText(sourceFile.tokenIndex, 0, source.length, "missing"), undefined);
-	assert.throws(
-		() => requireTokenByText(sourceFile.tokenIndex, 0, source.length, "missing"),
-		/Internal parser invariant: expected "missing"/u,
-	);
+	assert.equal(actualImplements.start, source.lastIndexOf("implements", firstStart));
+	assert.equal(findSourceText(sourceFile.gaps, 0, source.length, "missing"), undefined);
+});
+
+test("previous syntax boundaries skip comments and whitespace", () => {
+	const source = "value /* trailing */   ";
+	const sourceFile = parseTypeScript(source, false);
+
+	assert.equal(previousSyntaxEnd(sourceFile.gaps, 0, source.length), "value".length);
 });
 
 test("comment range queries preserve interval semantics", () => {

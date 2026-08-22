@@ -24,5 +24,8 @@ test("a conditional expression does not consume a following top-level await", ()
 });
 
 test("a conditional expression does not hide an invalid top-level return", () => {
-	assert.throws(() => parseTypeScript(`${ambiguousConditional}return;\n`, false), /'return' outside of function/u);
+	assert.throws(
+		() => parseTypeScript(`${ambiguousConditional}return;\n`, false),
+		/'return' statement is only valid inside a function/u,
+	);
 });

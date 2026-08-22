@@ -1,1 +1,1 @@
-SyntaxError: Unexpected token (1:11)
+SyntaxError: Expected JSX element name, but found 'end of file'
