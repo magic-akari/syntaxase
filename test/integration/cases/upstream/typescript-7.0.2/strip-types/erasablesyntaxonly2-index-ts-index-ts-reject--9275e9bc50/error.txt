@@ -1,1 +1,0 @@
-SyntaxError: Expected '>' to close a type assertion, but found 'function'

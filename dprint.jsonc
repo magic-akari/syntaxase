@@ -1,22 +1,20 @@
 {
+	"useTabs": true,
 	"indentWidth": 4,
 	"lineWidth": 120,
 	"newLineKind": "lf",
-	"useTabs": true,
 
 	"markdown": {},
 	"biome": {},
-	"oxc": {},
 	"yaml": {},
 	"excludes": [
+		"benchmark/package-lock.json",
 		"test/integration/cases",
-		"index.js",
-		"parser.js",
-		"internal/**/*.js",
-		"types",
-		"**/*.js.map",
-		"**/node_modules",
-		"**/package-lock.json"
+		"npm/syntaxase/binding.js",
+		"npm/syntaxase/package.json",
+		"npm/syntaxase/@syntaxase",
+		"npm/syntaxase-wasm/package.json",
+		"npm/syntaxase-wasm/wasm.js"
 	],
-	"plugins": ["npm:@dprint/markdown", "npm:@dprint/oxc", "npm:@dprint/biome", "npm:dprint-plugin-yaml"]
+	"plugins": ["npm:@dprint/markdown", "npm:@dprint/biome", "npm:dprint-plugin-yaml"]
 }

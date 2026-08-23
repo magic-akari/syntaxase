@@ -36,5 +36,6 @@
 			"development": true,
 			"runtime": "classic"
 		}
-	}
+	},
+	"expectation": "recovery"
 }

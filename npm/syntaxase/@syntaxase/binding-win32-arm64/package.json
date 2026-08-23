@@ -1,0 +1,33 @@
+{
+  "name": "@syntaxase/binding-win32-arm64",
+  "version": "0.0.0",
+  "license": "MIT",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/magic-akari/syntaxase.git"
+  },
+  "main": "syntaxase.node",
+  "files": [
+    "syntaxase.node"
+  ],
+  "keywords": [
+    "typescript",
+    "tsx",
+    "jsx",
+    "transformer",
+    "strip-types"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/magic-akari"
+  }
+}

@@ -1,1 +1,0 @@
-SyntaxError: Rest parameter may not have a trailing comma

@@ -33,5 +33,6 @@
 				"forwarded-by:runErrorCase"
 			]
 		}
-	]
+	],
+	"expectation": "recovery"
 }

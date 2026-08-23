@@ -32,8 +32,8 @@
 		}
 	],
 	"blocker": {
-		"dependency": "@yuku-parser/wasm",
-		"expected": "output",
-		"reason": "Yuku reports diagnostics for parenthesized arrow-function return types in this fixture"
-	}
+		"dependency": "yuku",
+		"reason": "Yuku recovery does not expose every parenthesized arrow-function return type as erasable syntax"
+	},
+	"expectation": "recovery"
 }

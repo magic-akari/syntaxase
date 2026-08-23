@@ -2,16 +2,17 @@
 	"name": "syntaxase-benchmark",
 	"private": true,
 	"type": "module",
-	"engines": {
-		"node": ">=20"
-	},
 	"dependencies": {
-		"@babel/core": "8.0.1",
-		"@babel/plugin-transform-react-jsx": "8.0.1",
-		"@babel/plugin-transform-typescript": "8.0.1",
-		"acorn": "8.18.0",
-		"oxc-transform": "0.144.0",
+		"@babel/standalone": "8.0.4",
+		"@oxc-transform/binding-wasm32-wasi": "0.146.0",
+		"oxc-transform": "0.146.0",
 		"sucrase": "3.35.1",
 		"ts-blank-space": "0.9.0"
+	},
+	"devDependencies": {
+		"@vitest/browser": "4.1.11",
+		"@vitest/browser-playwright": "4.1.11",
+		"playwright": "1.62.1",
+		"vitest": "4.1.11"
 	}
 }

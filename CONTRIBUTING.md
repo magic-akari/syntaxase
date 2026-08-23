@@ -1,104 +1,273 @@
-# Contributing to syntaxase
+# Contributing to Syntaxase
 
-## Setup and verification
+Syntaxase is implemented in Zig on Yuku's native parser, AST, token stream, and
+walker. Native Zig, Node-API, and WebAssembly use the same transform pipeline.
 
-The package and test suite target Node.js 20 and newer. Correctness CI exercises
-both the minimum supported major and the current development major.
+## Requirements
 
-```sh
-npm install
-npm run build
-npm run typecheck
-npm run typecheck:test
-npm test
-```
+- [mise](https://mise.jdx.dev/) 2026.7.7 or newer
+- A locally installed Chrome for the browser benchmark
 
-`npm run build` emits JavaScript beside the TypeScript sources and declarations
-under `types/`. Compiler source maps and declaration maps are intentionally not
-generated or published. Do not edit generated JavaScript or declarations by
-hand.
-
-Format source and documentation with:
+Install the complete pinned toolchain and project dependencies:
 
 ```sh
-npm exec -- dprint fmt
-npm exec -- dprint check
+mise install
+mise run install
 ```
 
-## Architecture rules
+The repository configuration owns the Node.js, Zig, dprint, and `napi-zig`
+versions. npm installs dprint's pinned WebAssembly plugins and JavaScript runtime
+dependencies through mise dependency tasks. `mise` owns every development,
+test, benchmark, and release entry point. Run `mise tasks` to list them.
 
-The pipeline is:
+## Architecture
 
-```text
-parse SourceFile once
-  -> one native Yuku AST traversal
-       -> erase fixed-width TypeScript
-       -> collect runtime features and names when transforming
-  -> seal EditTree fixed phase
-  -> lower runtime features
-  -> render JavaScript
+Yuku owns parsing, the native AST, UTF-8 source spans, tokens, comments,
+diagnostics, and general traversal. Syntaxase works directly on those native
+structures; it does not convert to ESTree or serialize an intermediate AST.
+
+The transform pipeline is linear:
+
+1. Parse the source once with Yuku.
+2. Walk native nodes to collect type erasures and runtime lowering tasks.
+3. Use parser-authoritative tokens for punctuation and edit boundaries.
+4. Seal fixed-width edits in original UTF-8 coordinates.
+5. Lower runtime TypeScript and JSX into original-span fragments.
+6. Render once from the original source.
+
+Internal coordinates are UTF-8 byte offsets. Fixed type erasure preserves the
+JavaScript UTF-16 width and physical line layout of the source. Runtime
+lowering therefore keeps original spans instead of applying AST offsets to an
+intermediate string.
+
+Each public transform uses a scratch arena for the Yuku tree, edit plans,
+runtime tasks, fragments, and generated intermediate text. Final code and
+copied diagnostics use the caller allocator and outlive the scratch arena.
+
+Yuku diagnostics accompany recovery output. Syntaxase does not add a second
+semantic rejection policy.
+
+## Build
+
+Build the native command-line verification shell:
+
+```sh
+mise run build
 ```
 
-- `parser.ts` parses with `@yuku-parser/wasm` and creates the `SourceFile`.
-- `internal/source-file.ts` owns source, Yuku comments, the opaque source-gap
-  cursor, and the shared physical-line layout.
-- Feature modules use Yuku's `Node` union and concrete node types directly;
-  `yuku-ast.walk` owns schema-driven traversal.
-- `internal/type-eraser.ts` owns position-preserving erasure.
-- `internal/runtime-transformer.ts` only routes syntax nodes and dispatches
-  source-ordered feature tasks.
-- `internal/runtime/` owns collection, typed tasks, and lowering for enum,
-  namespace, parameter-property, and import-equals syntax.
-- `internal/jsx-emitter.ts` owns JSX lowering.
-- `internal/edit-tree.ts` owns all edits and phase transitions.
+Transform standard input:
 
-Add syntax to the fixed phase only when erasure preserves UTF-16 width and every
-physical line terminator. Runtime syntax belongs in one complete feature
-lowerer. Shared classifications belong in a shared module, not as duplicated
-feature tests. Do not build a semantic model until a concrete lowering consumes
-it.
+```sh
+printf 'const answer: number = 42;\n' | mise run run
+```
 
-Treat Yuku as authoritative. Do not preprocess source, normalize or adapt its
-AST, patch dependency behavior, reflectively walk nodes, or add a token stream
-for a parser gap. Use bounded required source-gap queries when a Yuku
-discriminant proves punctuation exists, and optional queries only when absence
-is valid. Record a dependency blocker for missing parser syntax. Internal invariants are
-protected with type contracts, focused invariant tests, and integration cases rather
-than production validation passes.
+The library API in `src/root.zig` is authoritative; the CLI is only a thin
+stdin/stdout shell.
+
+Build and test the current platform's Node-API package:
+
+```sh
+mise run test:napi
+```
 
 ## Tests
 
-The suite has four correctness layers:
-
-- `test/smoke/`: three fast public-entry health checks.
-- `test/unit/`: project-owned module invariants and compile-only type contracts.
-- `test/integration/`: exact public behavior over minimal manual cases and
-  pinned upstream inputs.
-- `test/tooling/`: fixture and importer infrastructure.
-
-Run integration tests without rewriting results:
+Run the native, Node-API, and publishable WebAssembly correctness layers:
 
 ```sh
-npm run test:integration
+mise run test
 ```
 
-Only update results for an intentional product behavior change, and always make
-the scope explicit:
+The release-facing layers can also run independently:
 
 ```sh
-npm run fixtures:update -- --all
-git diff -- test/integration/cases
+mise run test:zig
+mise run test:napi
+mise run test:wasm-package
 ```
 
-Preserve existing integration output during unrelated architectural work.
-Review every output, error, blocker, metadata, and catalog change before
-committing. See [test/README.md](test/README.md) for ownership, import, and result
-rules.
+To validate the disposable WebAssembly staging output without updating the
+publishable package, run:
 
-## Before submitting
+```sh
+mise run test:wasm
+```
 
-- Keep the change within one architectural owner.
-- Add the smallest test that protects the complete behavior class.
-- Run `npm test` and `npm exec -- dprint check`.
-- Review generated package artifacts and integration fixture diffs.
-- Update public and architecture documentation when their contracts change.
+- Module-level tests live beside their Zig implementation.
+- `test/smoke.zig` exercises the public native API.
+- `test/integration.zig` checks the committed fixture corpus byte for byte.
+- `test/js-api.mjs` defines the shared JavaScript API contract.
+- `test/napi.mjs` and `test/wasm.mjs` run that contract against each boundary.
+
+### Integration fixtures
+
+Each directory under `test/integration/cases` contains one `case.json`, one
+input, and optionally one committed `output.js`:
+
+```text
+case.json
+input.ts | input.tsx | input.mts | input.cts
+output.js
+```
+
+An `output.js` is compared byte for byte. A case without one must declare a
+recovery expectation and may record a current Yuku blocker. Recovery cases
+exercise diagnostic transport without snapshotting Yuku's wording.
+
+Manual fixtures must name one unique invariant and explain why upstream
+coverage is insufficient. Upstream fixtures retain their exact origin,
+revision, license, and provenance. Do not remove fixture `LICENSE` or
+`PROVENANCE.md` files.
+
+## Node-API
+
+The npm packages follow Yuku's split Node-API/WebAssembly topology. The
+Node-API package uses the `napi-zig` main-package/platform-package layout:
+
+```text
+npm/syntaxase/
+├── index.js
+├── index.d.ts
+├── binding.js
+├── options.js
+└── @syntaxase/
+    └── binding-<platform>/
+        └── package.json
+```
+
+`src/ffi/napi.zig` is a thin binding over the shared normalized transform.
+`index.js` owns the public `transform` and `stripTypes` API, while generated
+`binding.js` selects the installed platform package.
+
+Build only the current platform during development:
+
+```sh
+mise run build:local
+```
+
+Build every supported platform before publishing:
+
+```sh
+mise run build:npm
+```
+
+The platform `.node` files are derived artifacts and are not committed. An
+Android build additionally requires an Android NDK or a Zig libc file.
+
+## WebAssembly
+
+The WebAssembly package is independent of the Node-API main package and its
+platform bindings:
+
+```text
+npm/syntaxase-wasm/
+├── index.js
+├── index.d.ts
+├── options.js
+└── wasm.js
+```
+
+Refresh the publishable synchronous inline WebAssembly package:
+
+```sh
+mise run build:wasm
+```
+
+Build the same package into the disposable Zig staging directory:
+
+```sh
+mise run build:wasm-stage
+```
+
+The staged output is installed under `zig-out/wasm`:
+
+```text
+index.js
+index.d.ts
+options.js
+wasm.js
+```
+
+`wasm.js` contains only the generated Base64 byte module. `index.js`
+constructs `WebAssembly.Module` and `WebAssembly.Instance` synchronously, with
+no top-level await. The freestanding ABI accepts one contiguous UTF-8 input and
+returns one length-prefixed UTF-8 string.
+
+Like Yuku's generated `.wasm` package files, `wasm.js` is a derived release
+artifact and is not committed. The publishing CI must run
+`mise run build:wasm` before packing `syntaxase-wasm`; packing a clean checkout
+directly is not a supported release path.
+
+`src/js/options.js` and `src/js/index.d.ts` are the canonical shared JavaScript
+sources. `mise run sync:js` updates their generated copies in both npm
+packages; do not edit those copies directly.
+
+The JavaScript API intentionally returns only strings. Yuku recovery
+diagnostics remain available through the native Zig API; hard allocation or
+internal failures throw at the JavaScript boundary.
+
+## Benchmarks
+
+Install the isolated benchmark dependencies without downloading a browser,
+then prepare the pinned corpora:
+
+```sh
+mise run bench:prepare
+```
+
+Run the native comparison with Oxc:
+
+```sh
+mise run bench:native
+```
+
+Run the real-browser WebAssembly comparison:
+
+```sh
+mise run bench:wasm
+```
+
+The browser lane compares Syntaxase with the official Oxc browser package,
+Babel, Sucrase, and ts-blank-space where their behavior is comparable.
+
+Initialization, dependency loading, input I/O, option construction, and warmup
+are outside timed regions. Encoding, linear-memory copies, transformation, and
+decoding remain inside each timed public WebAssembly call.
+
+Benchmarks are evidence rather than CI thresholds. Compare performance-path
+changes with a baseline from the same machine, using identical toolchains,
+dependencies, benchmark code, and corpora. A separate worktree keeps the two
+builds independent:
+
+```sh
+git worktree add ../syntaxase-baseline <baseline-ref>
+(cd ../syntaxase-baseline && mise install && mise run bench:prepare)
+```
+
+Prepare the current worktree as described above, then alternate current and
+baseline runs to reduce thermal and execution-order bias:
+
+```sh
+for tree in . ../syntaxase-baseline . ../syntaxase-baseline; do
+	(cd "$tree" && mise run bench:native)
+done
+```
+
+Use `bench:wasm` in the same sequence for WebAssembly changes. Compare the
+Syntaxase measurements from each run, record the machine and toolchain, and do
+not mix results if the benchmark harness or corpus changed between worktrees.
+Remove the baseline when finished with
+`git worktree remove ../syntaxase-baseline`.
+
+## Code conventions
+
+- Use `snake_case` for internal Zig functions and methods. The public
+  `stripTypes` name intentionally matches the JavaScript API.
+- Keep computations linear and ownership explicit.
+- Prefer architectural fixes over syntax-specific workarounds.
+- Preserve Yuku's native AST and final token stream as the parser boundary.
+- Keep source edits in original UTF-8 coordinates.
+- Add focused module tests for stable invariants and integration fixtures for
+  public output behavior.
+- Run `mise run check` and the relevant benchmark before submitting
+  a performance-sensitive change.

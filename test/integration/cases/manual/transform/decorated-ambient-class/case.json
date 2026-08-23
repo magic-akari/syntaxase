@@ -5,8 +5,8 @@
 	"invariant": "transform.decorated-ambient-declaration",
 	"whyManual": "The decorator must be erased with its ambient declaration so no dangling runtime expression remains.",
 	"blocker": {
-		"dependency": "@yuku-parser/wasm",
-		"expected": "output",
-		"reason": "Yuku reports a diagnostic when a decorator precedes an ambient class declaration"
-	}
+		"dependency": "yuku",
+		"reason": "Yuku recovery keeps a decorator before an ambient class declaration in the runtime tree"
+	},
+	"expectation": "recovery"
 }

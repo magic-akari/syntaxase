@@ -1,0 +1,26 @@
+.{
+    .name = .syntaxase,
+    .version = "0.1.0",
+    .dependencies = .{
+        .napi_zig = .{
+            .url = "git+https://github.com/yuku-toolchain/napi-zig?ref=HEAD#253f5a92b1c0c70ad13a6583993a9befb88d1116",
+            .hash = "napi_zig-0.2.0-XRkY0Y8XAgBr17lGjp5nFI-CYpmjGManq9S4TkaY-D5g",
+        },
+        .yuku = .{
+            .url = "git+https://github.com/yuku-toolchain/yuku#8aa65fa3c6b58b5b16058693665dffa173879ecb",
+            .hash = "yuku-0.3.0-m6ranjP4EwBgImfTk4Ak99zfzHMS__p4jJ8ow71bK_kI",
+        },
+    },
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0xad04d111d608bf68,
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "benchmark",
+        "CONTRIBUTING.md",
+        "src",
+        "test",
+        "wasm",
+        "README.md",
+    },
+}

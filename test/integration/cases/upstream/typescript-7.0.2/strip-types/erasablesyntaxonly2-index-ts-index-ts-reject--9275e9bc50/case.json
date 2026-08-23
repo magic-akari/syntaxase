@@ -31,5 +31,6 @@
 				"virtual-file"
 			]
 		}
-	]
+	],
+	"expectation": "recovery"
 }

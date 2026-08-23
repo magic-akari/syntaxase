@@ -1,1 +1,5 @@
-/test/integration/cases/** -text
+# Keep formatter-visible text identical across operating systems.
+* text=auto eol=lf
+
+# Conformance fixtures may intentionally contain CRLF and are byte-exact.
+/test/integration/cases/** -text -eol

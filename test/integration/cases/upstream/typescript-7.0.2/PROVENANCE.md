@@ -6,10 +6,10 @@
 - Fixture commit: `4d4f005c8541e0255a9d8791205fdce326e462bc`
 - Fixture cases: `tests/cases/compiler/erasableSyntaxOnly.ts` and
   `tests/cases/compiler/erasableSyntaxOnly2.ts`
-- Outcome oracle: the corresponding committed TypeScript `.errors.txt`
+- Classification source: the corresponding committed TypeScript `.errors.txt`
   baselines; each `@filename` virtual file forms one Syntaxase workload
 - License: Apache-2.0
 
 Declaration-file and JavaScript-only controls are outside the single-source
-runtime API. Inputs and outcome metadata are imported from the pinned Git tree;
-TypeScript is not loaded by the integration runner.
+runtime API. Rejected virtual files exercise Yuku recovery without adopting the
+TypeScript diagnostic text. TypeScript is not loaded by the integration runner.

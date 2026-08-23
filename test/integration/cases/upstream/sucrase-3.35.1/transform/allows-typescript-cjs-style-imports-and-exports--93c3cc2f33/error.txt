@@ -1,1 +1,0 @@
-SyntaxError: TypeScript export assignment is not supported in ESM output

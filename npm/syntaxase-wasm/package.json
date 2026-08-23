@@ -1,0 +1,39 @@
+{
+  "name": "syntaxase-wasm",
+  "version": "0.0.0",
+  "description": "Lightning-fast type stripping and JSX lowering",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/magic-akari/syntaxase.git"
+  },
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js",
+      "default": "./index.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "options.js",
+    "wasm.js"
+  ],
+  "author": "magic-akari <akari.ccino@gmail.com>",
+  "homepage": "https://github.com/magic-akari/syntaxase",
+  "keywords": [
+    "typescript",
+    "tsx",
+    "jsx",
+    "transformer",
+    "strip-types"
+  ],
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/magic-akari"
+  }
+}

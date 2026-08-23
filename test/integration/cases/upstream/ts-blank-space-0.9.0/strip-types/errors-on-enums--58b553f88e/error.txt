@@ -1,1 +1,0 @@
-SyntaxError: TypeScript enum requires runtime lowering

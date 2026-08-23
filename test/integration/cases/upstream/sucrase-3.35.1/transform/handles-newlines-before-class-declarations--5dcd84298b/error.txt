@@ -1,1 +1,0 @@
-SyntaxError: 'const' declarations must be initialized

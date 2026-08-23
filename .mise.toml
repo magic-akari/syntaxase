@@ -1,0 +1,146 @@
+min_version = "2026.8.10"
+
+[tools]
+dprint = "0.56.1"
+node = "24.19.0"
+"npm:napi-zig" = "0.2.8"
+zig = "0.16.0"
+
+[env]
+DPRINT_CACHE_DIR = "{{config_root}}/.cache/dprint"
+
+[tasks.install]
+description = "Install all project dependencies"
+depends = ["deps:zig", "deps:root", "deps:benchmark"]
+
+[tasks."deps:zig"]
+description = "Fetch the locked Zig package dependencies"
+hide = true
+run = "zig build --fetch"
+
+[tasks."deps:root"]
+description = "Install the root npm development dependencies"
+hide = true
+run = "npm ci --ignore-scripts --omit=optional"
+sources = ["package.json", "package-lock.json"]
+outputs = ["node_modules/.package-lock.json"]
+
+[tasks."deps:benchmark"]
+description = "Install the isolated benchmark dependencies"
+hide = true
+env = { PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1" }
+run = "npm ci --ignore-scripts --prefix benchmark"
+sources = ["benchmark/package.json", "benchmark/package-lock.json"]
+outputs = ["benchmark/node_modules/.package-lock.json"]
+
+[tasks.fmt]
+description = "Format every maintained source file"
+depends = ["deps:root"]
+run = ["dprint fmt", "zig fmt build.zig build.zig.zon benchmark src test wasm"]
+
+[tasks."fmt:check"]
+description = "Check formatting without changing files"
+depends = ["deps:root"]
+run = [
+  "dprint check",
+  "zig fmt --check build.zig build.zig.zon benchmark src test wasm",
+]
+
+[tasks.build]
+description = "Build the native command-line verification shell"
+depends = ["deps:zig"]
+run = "zig build"
+
+[tasks.run]
+description = "Run the native command-line verification shell"
+depends = ["deps:zig"]
+raw = true
+run = "zig build run"
+
+[tasks."sync:js"]
+description = "Refresh generated JavaScript package sources"
+depends = ["deps:zig"]
+hide = true
+run = "zig build sync-js"
+
+[tasks."build:local"]
+description = "Build the current platform's Node-API package"
+depends = ["sync:js", "deps:root"]
+run = "napi-zig build --release --current"
+
+[tasks."build:npm"]
+description = "Build every supported Node-API platform package"
+depends = ["sync:js", "deps:root"]
+run = "napi-zig build --release"
+
+[tasks."build:wasm"]
+description = "Refresh the publishable WebAssembly package"
+depends = ["sync:js"]
+run = "zig build wasm-package"
+
+[tasks."build:wasm-stage"]
+description = "Build the WebAssembly package in zig-out"
+depends = ["deps:zig"]
+hide = true
+run = "zig build wasm"
+
+[tasks."release:prepare"]
+description = "Bump npm package versions, commit, and tag without pushing"
+depends = ["check"]
+raw = true
+run = """
+if test -n "$(git status --porcelain)"; then
+	echo "error: release:prepare requires a clean working tree" >&2
+	git status --short >&2
+	exit 1
+fi
+napi-zig bump --no-push
+"""
+
+[tasks."test:zig"]
+description = "Run the native Zig correctness tests"
+depends = ["deps:zig"]
+run = "zig build test"
+
+[tasks."test:napi"]
+description = "Build and test the current platform's Node-API package"
+depends = ["build:local"]
+run = "node test/napi.mjs"
+
+[tasks."test:wasm"]
+description = "Build and test the staged WebAssembly package"
+depends = ["build:wasm-stage"]
+run = "node test/wasm.mjs zig-out/wasm/index.js"
+
+[tasks."test:wasm-package"]
+description = "Build and test the publishable WebAssembly package"
+depends = ["build:wasm"]
+run = "node test/wasm.mjs"
+
+[tasks.test]
+description = "Run the native, Node-API, and publishable WebAssembly tests"
+depends = ["test:zig", "test:napi", "test:wasm-package"]
+
+[tasks.check]
+description = "Run all formatting and correctness checks"
+depends = ["test"]
+run = [
+  "dprint check",
+  "zig fmt --check build.zig build.zig.zon benchmark src test wasm",
+  'git diff --exit-code -- "npm/syntaxase/binding.js" ":(glob)npm/syntaxase/**/package.json" ":(glob)npm/syntaxase*/*.d.ts" ":(glob)npm/syntaxase*/options.js"',
+]
+
+[tasks."bench:prepare"]
+description = "Install benchmark dependencies and prepare the pinned corpora"
+depends = ["deps:benchmark"]
+run = "node benchmark/prepare.mjs"
+
+[tasks."bench:native"]
+description = "Compare warmed native Syntaxase and Oxc transforms"
+depends = ["bench:prepare", "deps:zig"]
+run = ["zig build benchmark-native", "node --expose-gc benchmark/compare.mjs"]
+
+[tasks."bench:wasm"]
+description = "Compare warmed browser WebAssembly transforms"
+depends = ["bench:prepare", "build:wasm-stage"]
+run = "node benchmark/node_modules/vitest/vitest.mjs run --config benchmark/vitest.config.mjs"

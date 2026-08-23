@@ -32,8 +32,8 @@
 		}
 	],
 	"blocker": {
-		"dependency": "@yuku-parser/wasm",
-		"expected": "output",
-		"reason": "Yuku reports diagnostics for TypeScript type arguments in decorator expressions"
-	}
+		"dependency": "yuku",
+		"reason": "Yuku recovery does not expose TypeScript type arguments in decorator expressions as erasable syntax"
+	},
+	"expectation": "recovery"
 }

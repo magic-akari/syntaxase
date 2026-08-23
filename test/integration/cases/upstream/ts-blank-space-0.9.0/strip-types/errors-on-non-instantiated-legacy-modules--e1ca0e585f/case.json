@@ -32,9 +32,5 @@
 			]
 		}
 	],
-	"blocker": {
-		"dependency": "syntaxase",
-		"expected": "error",
-		"reason": "stripTypes currently preserves a non-instantiated legacy module for which ts-blank-space reports a diagnostic"
-	}
+	"expectation": "recovery"
 }

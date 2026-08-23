@@ -1,0 +1,36 @@
+{
+  "name": "@syntaxase/binding-linux-arm64-gnu",
+  "version": "0.0.0",
+  "license": "MIT",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "libc": [
+    "glibc"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/magic-akari/syntaxase.git"
+  },
+  "main": "syntaxase.node",
+  "files": [
+    "syntaxase.node"
+  ],
+  "keywords": [
+    "typescript",
+    "tsx",
+    "jsx",
+    "transformer",
+    "strip-types"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/magic-akari"
+  }
+}

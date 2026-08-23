@@ -1,1 +1,0 @@
-SyntaxError: Identifier cannot immediately follow a numeric literal

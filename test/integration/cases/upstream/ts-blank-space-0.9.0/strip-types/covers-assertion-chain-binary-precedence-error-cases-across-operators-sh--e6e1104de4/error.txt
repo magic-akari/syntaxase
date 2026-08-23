@@ -1,1 +1,0 @@
-SyntaxError: Type assertion requires parentheses that cannot be inserted in place

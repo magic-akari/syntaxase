@@ -1,143 +1,46 @@
-# syntaxase
+# Syntaxase
 
-Fast, layout-conscious TypeScript and JSX lowering for modern ESM toolchains.
+Lightning-fast type stripping and JSX lowering.
 
-Syntaxase parses each source string once, erases TypeScript syntax, and lowers the
-small set of TypeScript and JSX constructs that require JavaScript output. It
-returns JavaScript directly; it does not produce source maps, filename-derived
-metadata, or React `displayName` assignments.
+Named like an enzyme, Syntaxase removes erasable TypeScript syntax and lowers supported TypeScript and JSX runtime constructs.
 
-## Installation
+## Install
 
 ```sh
 npm install syntaxase
 ```
 
-## API
+For WebAssembly environments, install the separately published package:
 
-### `stripTypes(sourceText)`
-
-Use `stripTypes` when the input contains only erasable TypeScript syntax:
-
-```js
-import { stripTypes } from "syntaxase";
-
-const code = stripTypes("export const answer: number = 42;\n");
+```sh
+npm install syntaxase-wasm
 ```
 
-The returned string has the same UTF-16 width and physical line terminators as
-the input. Syntax that needs runtime JavaScript, such as enums, instantiated
-namespaces, parameter properties, and import assignments, is rejected.
-
-### `transform(sourceText, options?)`
-
-Use `transform` when runtime lowering or JSX is required:
+## Usage
 
 ```js
-import { transform } from "syntaxase";
+import { stripTypes, transform } from "syntaxase";
 
-const code = transform(`
-	export enum Status {
-		Ready,
-		Done,
-	}
+const stripped = stripTypes(`
+interface User { name: string }
+const user: User = { name: "Ada" };
 `);
-```
 
-The result is a string. Runtime output is placed on or around the original
-physical source lines whenever the lowering permits it, so existing line-based
-diagnostics remain useful without generating a source map.
-
-Import assignments keep the project-specific ESM behavior:
-
-```ts
-import dependency = require("dependency");
-```
-
-becomes:
-
-```js
-const dependency = import.sync("dependency");
-```
-
-Qualified aliases such as `import value = Namespace.value` become ordinary
-`const` aliases.
-
-## JSX
-
-`jsx: true` selects the automatic production runtime:
-
-```js
-const code = transform("export const View = () => <main />;", { jsx: true });
-```
-
-The JSX configuration is discriminated by runtime:
-
-```ts
-interface TransformOptions {
-	jsx?: boolean | JSXConfig;
-}
-
-type JSXConfig =
-	| {
-			runtime?: "automatic";
-			development?: boolean;
-			importSource?: string;
-	  }
-	| {
-			runtime: "classic";
-			development?: boolean;
-			pragma?: string;
-			pragmaFrag?: string;
-	  }
-	| {
-			runtime: "preserve";
-	  };
-```
-
-```js
-const development = transform(source, {
-	jsx: { development: true },
-});
-
-const preact = transform(source, {
-	jsx: { importSource: "preact" },
-});
-
-const classic = transform(source, {
-	jsx: {
-		runtime: "classic",
-		pragma: "h",
-		pragmaFrag: "Fragment",
-	},
-});
-
-const preserved = transform(source, {
-	jsx: { runtime: "preserve" },
+const transformed = transform(`const view: JSX.Element = <h1>Hello</h1>;`, {
+	jsx: true,
 });
 ```
 
-For the automatic runtime, `development` selects `jsxDEV` and the package's
-`jsx-dev-runtime`. Classic configuration may carry the same field, but Syntaxase
-does not read it and produces identical classic output for either value. It does
-not implement the legacy classic `__source`/`__self` transform, so no source
-filename option is needed.
+Use the same named exports from `syntaxase-wasm` when targeting WebAssembly.
 
-## Product boundary
+## API notes
 
-Syntaxase parses with Yuku WASM and consumes the native Yuku AST through
-`yuku-ast`; it does not normalize the tree into another parser's shape.
-Syntaxase preserves modern JavaScript and ESM syntax. It does not patch parser
-dependencies, emulate unrelated Babel/Sucrase transforms, provide compatibility
-aliases for pre-release APIs, infer React display names, or generate source
-maps. Unsupported parser syntax is tracked as an upstream dependency blocker
-instead of being recovered with token-level guesses.
+- `stripTypes` performs fixed-width erasure while preserving source length and line layout. Use it with source accepted by TypeScript's [`erasableSyntaxOnly`](https://www.typescriptlang.org/tsconfig/erasableSyntaxOnly.html) option.
+- `transform` additionally lowers supported runtime TypeScript constructs and optional JSX. `{ jsx: true }` uses React's automatic production runtime.
+- The JavaScript packages return strings, not parser diagnostics. Use a TypeScript checker or another parser when validation is required.
 
 ## Acknowledgements
 
-Special thanks to [Sucrase](https://github.com/alangpierce/sucrase) and
-[ts-blank-space](https://github.com/bloomberg/ts-blank-space) for the ideas that
-inspired Syntaxase; to [Yuku](https://github.com/yuku-toolchain/yuku) for serving
-as the project's foundation; and to
-[@sveltejs/acorn-typescript](https://github.com/sveltejs/acorn-typescript), which
-powered the original prototype.
+Special thanks to [Sucrase](https://github.com/alangpierce/sucrase) and [ts-blank-space](https://github.com/bloomberg/ts-blank-space) for the ideas that inspired Syntaxase; to [Yuku](https://github.com/yuku-toolchain/yuku) for serving as the project's foundation; and to [@sveltejs/acorn-typescript](https://github.com/sveltejs/acorn-typescript), which powered the original prototype.
+
+See the [`syntaxase` package documentation](npm/syntaxase/README.md) for all JSX options and defaults. See [CONTRIBUTING.md](CONTRIBUTING.md) to work on Syntaxase itself.

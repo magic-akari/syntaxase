@@ -32,5 +32,6 @@
 				"template-literal"
 			]
 		}
-	]
+	],
+	"expectation": "recovery"
 }

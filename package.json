@@ -1,55 +1,11 @@
 {
-	"name": "syntaxase",
-	"version": "0.1.0",
-	"description": "Lightning-fast TypeScript and JSX stripping for modern ESM toolchains.",
+	"name": "syntaxase-root",
+	"version": "0.0.0",
+	"private": true,
 	"type": "module",
-	"license": "MIT OR Apache-2.0",
-	"exports": {
-		".": {
-			"types": "./types/index.d.ts",
-			"import": "./index.js"
-		}
-	},
-	"main": "./index.js",
-	"types": "./types/index.d.ts",
-	"files": ["*.ts", "*.js", "internal/**/*.ts", "internal/**/*.js", "types/**/*.d.ts", "LICENSE-*"],
-	"sideEffects": false,
-	"scripts": {
-		"benchmark": "npm run benchmark:regression --",
-		"benchmark:compare": "npm run build && node --expose-gc benchmark/compare.mjs",
-		"benchmark:edit-tree": "npm run build && node --expose-gc benchmark/edit-tree.mjs",
-		"benchmark:prepare": "node benchmark/prepare.mjs",
-		"benchmark:regression": "npm run build && node --expose-gc benchmark/run.mjs",
-		"build": "tsc -p tsconfig.json",
-		"fixtures:sync": "node test/integration/importers/cli.js --config test/integration/upstream/config.json",
-		"fixtures:update": "npm run build && node test/integration/update-fixtures.js",
-		"fixtures:verify": "npm run build && node test/integration/update-fixtures.js --all --check",
-		"prepack": "npm run build",
-		"pretest": "npm run build && npm run typecheck:test",
-		"test": "node --test test/smoke/*.test.js test/unit/*.test.js test/integration/*.test.js test/tooling/*.test.js",
-		"test:coverage": "npm run build && node --experimental-test-coverage --test --test-coverage-include=\"index.js\" --test-coverage-include=\"parser.js\" --test-coverage-include=\"internal/**/*.js\" test/smoke/*.test.js test/unit/*.test.js test/integration/*.test.js",
-		"test:integration": "npm run build && node --test test/integration/*.test.js",
-		"test:smoke": "npm run build && node --test test/smoke/*.test.js",
-		"test:tooling": "npm run build && node --test test/tooling/*.test.js",
-		"test:unit": "npm run build && npm run typecheck:test && node --test test/unit/*.test.js",
-		"typecheck": "tsc -p tsconfig.json --noEmit",
-		"typecheck:test": "tsc -p tsconfig.test.json"
-	},
-	"engines": {
-		"node": ">=20"
-	},
-	"dependencies": {
-		"@yuku-parser/wasm": "0.8.1",
-		"yuku-ast": "0.8.7"
-	},
 	"devDependencies": {
-		"@dprint/biome": "^0.13.6",
-		"@dprint/markdown": "^0.22.1",
-		"@dprint/oxc": "^0.34.0",
-		"@sveltejs/acorn-typescript": "1.0.13",
-		"acorn": "8.18.0",
-		"dprint": "^0.55.2",
-		"dprint-plugin-yaml": "^0.6.0",
-		"typescript": "7.0.2"
+		"@dprint/biome": "0.13.8",
+		"@dprint/markdown": "0.22.1",
+		"dprint-plugin-yaml": "0.6.0"
 	}
 }
