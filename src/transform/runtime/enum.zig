@@ -15,6 +15,55 @@ const RuntimeNameAllocator = runtime_name_allocator.RuntimeNameAllocator;
 const RuntimeFragment = runtime_edit_buffer.RuntimeFragment;
 const SourceFile = source_file.SourceFile;
 
+const strict_binding_reserved_words = std.StaticStringMap(void).initComptime(.{
+    .{ "await", {} },
+    .{ "break", {} },
+    .{ "case", {} },
+    .{ "catch", {} },
+    .{ "class", {} },
+    .{ "const", {} },
+    .{ "continue", {} },
+    .{ "debugger", {} },
+    .{ "default", {} },
+    .{ "delete", {} },
+    .{ "do", {} },
+    .{ "else", {} },
+    .{ "enum", {} },
+    .{ "export", {} },
+    .{ "extends", {} },
+    .{ "false", {} },
+    .{ "finally", {} },
+    .{ "for", {} },
+    .{ "function", {} },
+    .{ "if", {} },
+    .{ "implements", {} },
+    .{ "import", {} },
+    .{ "in", {} },
+    .{ "instanceof", {} },
+    .{ "interface", {} },
+    .{ "let", {} },
+    .{ "new", {} },
+    .{ "null", {} },
+    .{ "package", {} },
+    .{ "private", {} },
+    .{ "protected", {} },
+    .{ "public", {} },
+    .{ "return", {} },
+    .{ "static", {} },
+    .{ "super", {} },
+    .{ "switch", {} },
+    .{ "this", {} },
+    .{ "throw", {} },
+    .{ "true", {} },
+    .{ "try", {} },
+    .{ "typeof", {} },
+    .{ "var", {} },
+    .{ "void", {} },
+    .{ "while", {} },
+    .{ "with", {} },
+    .{ "yield", {} },
+});
+
 const MemberPlan = struct {
     index: NodeIndex,
     name: ?[]const u8,
@@ -94,11 +143,12 @@ pub fn emit(
             if (natural_names.contains(name)) {
                 const duplicate = assigned_names.contains(name);
                 try assigned_names.put(allocator, name, {});
-                local = if (is_strict_binding_identifier(name) and !duplicate)
+                const member_local = if (is_strict_binding_identifier(name) and !duplicate)
                     name
                 else
                     try names.claim_member_alias(name, &natural_names);
-                try reference_locals.put(allocator, name, local.?);
+                try reference_locals.put(allocator, name, member_local);
+                local = member_local;
             }
         }
         try member_plans.append(allocator, .{
@@ -418,14 +468,14 @@ const AlignedWriter = struct {
 
         if (self.current_line < target_line) {
             while (self.current_line < target_line) {
-                try self.append(local_line_ending(layout, source_line));
+                try self.append(layout.local_line_ending(@intCast(source_line)));
             }
             try self.append_blanked(prefix);
         } else if (self.current_column < source_column) {
             var spaces = source_column - self.current_column;
             while (spaces > 0) : (spaces -= 1) try self.append(" ");
         } else if (self.current_column > source_column) {
-            try self.append(local_line_ending(layout, source_line));
+            try self.append(layout.local_line_ending(@intCast(source_line)));
             try self.append_blanked(prefix);
         }
 
@@ -506,41 +556,20 @@ const AlignedWriter = struct {
         var segment_start: usize = 0;
         var offset: usize = 0;
         while (offset < text.len) {
-            const terminator = terminator_at(text, @intCast(offset), @intCast(text.len));
-            if (terminator.len == 0) {
+            const terminator = source_layout.line_terminator_prefix(text[offset..]);
+            if (terminator == .none) {
                 offset += 1;
                 continue;
             }
             self.current_column += unicode.utf16_width(text[segment_start..offset]);
             self.current_line += 1;
             self.current_column = 0;
-            offset += terminator.len;
+            offset += terminator.bytes().len;
             segment_start = offset;
         }
         self.current_column += unicode.utf16_width(text[segment_start..]);
     }
 };
-
-fn local_line_ending(layout: *const source_layout.SourceLayout, line: u32) []const u8 {
-    const local = layout.lines.items[line].terminator.bytes();
-    if (local.len > 0) return local;
-    for (layout.lines.items) |physical_line| {
-        const ending = physical_line.terminator.bytes();
-        if (ending.len > 0) return ending;
-    }
-    return "\n";
-}
-
-fn terminator_at(source: []const u8, start: u32, end: u32) []const u8 {
-    if (start >= end) return "";
-    const remaining = source[start..end];
-    if (std.mem.startsWith(u8, remaining, "\r\n")) return "\r\n";
-    if (std.mem.startsWith(u8, remaining, "\r")) return "\r";
-    if (std.mem.startsWith(u8, remaining, "\n")) return "\n";
-    if (std.mem.startsWith(u8, remaining, "\u{2028}")) return "\u{2028}";
-    if (std.mem.startsWith(u8, remaining, "\u{2029}")) return "\u{2029}";
-    return "";
-}
 
 fn is_identifier_name(name: []const u8) bool {
     if (name.len == 0) return false;
@@ -566,18 +595,5 @@ fn is_identifier_name(name: []const u8) bool {
 }
 
 fn is_strict_binding_identifier(name: []const u8) bool {
-    const reserved = [_][]const u8{
-        "await",     "break",    "case",       "catch",  "class",   "const",
-        "continue",  "debugger", "default",    "delete", "do",      "else",
-        "enum",      "export",   "extends",    "false",  "finally", "for",
-        "function",  "if",       "implements", "import", "in",      "instanceof",
-        "interface", "let",      "new",        "null",   "package", "private",
-        "protected", "public",   "return",     "static", "super",   "switch",
-        "this",      "throw",    "true",       "try",    "typeof",  "var",
-        "void",      "while",    "with",       "yield",
-    };
-    for (reserved) |keyword| {
-        if (std.mem.eql(u8, name, keyword)) return false;
-    }
-    return true;
+    return !strict_binding_reserved_words.has(name);
 }

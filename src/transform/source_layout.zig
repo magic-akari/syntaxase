@@ -104,10 +104,7 @@ pub const SourceLayout = struct {
         errdefer layout.deinit(allocator);
 
         while (true) {
-            const start: u32 = if (layout.lines.items.len == 0)
-                0
-            else
-                layout.lines.items[layout.lines.items.len - 1].end;
+            const start: u32 = if (layout.lines.getLastOrNull()) |last| last.end else 0;
             const line = scan_physical_line(
                 source,
                 start,
@@ -192,6 +189,21 @@ pub fn contains_line_terminator(source: []const u8) bool {
         if (terminator_at(source, offset) != .none) return true;
         offset += 1;
     }
+}
+
+pub fn line_terminator_prefix(source: []const u8) LineTerminator {
+    if (source.len == 0) return .none;
+    return terminator_at(source, 0);
+}
+
+pub fn ends_with_line_terminator(source: []const u8) bool {
+    if (source.len == 0) return false;
+    return switch (source[source.len - 1]) {
+        '\r', '\n' => true,
+        0xa8, 0xa9 => source.len >= 3 and
+            line_terminator_prefix(source[source.len - 3 ..]) != .none,
+        else => false,
+    };
 }
 
 pub fn count_line_terminators(source: []const u8) usize {
@@ -309,4 +321,13 @@ test "source cursor matches indexed layout for monotonic offsets" {
         try std.testing.expectEqualDeep(expected, actual);
     }
     try std.testing.expectEqualStrings("\r\n", cursor.preferred_line_ending());
+}
+
+test "line terminator helpers recognize prefixes and suffixes" {
+    try std.testing.expectEqual(LineTerminator.crlf, line_terminator_prefix("\r\nrest"));
+    try std.testing.expectEqual(LineTerminator.line_separator, line_terminator_prefix("\u{2028}rest"));
+    try std.testing.expectEqual(LineTerminator.none, line_terminator_prefix("rest"));
+    try std.testing.expect(ends_with_line_terminator("line\n"));
+    try std.testing.expect(ends_with_line_terminator("line\u{2029}"));
+    try std.testing.expect(!ends_with_line_terminator("line"));
 }

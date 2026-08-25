@@ -5,6 +5,7 @@ const namespace_semantics = @import("namespace_semantics.zig");
 const runtime_transformer = @import("runtime_transformer.zig");
 const source_layout = @import("source_layout.zig");
 const token_cursor = @import("token_cursor.zig");
+const unicode = @import("unicode.zig");
 
 const Action = parser.traverser.Action;
 const Allocator = std.mem.Allocator;
@@ -495,32 +496,34 @@ const Visitor = struct {
             return .skip;
         }
 
-        if (self.runtime != null and declaration.declaration != .null and
-            namespace_semantics.is_supported_runtime_export_declaration(ctx.tree, declaration.declaration) and
-            is_inside_runtime_namespace(ctx))
-        {
-            const wrapper_span = ctx.tree.span(index);
-            const declaration_span = ctx.tree.span(declaration.declaration);
-            if (self.tokens.find_forward(wrapper_span.start, declaration_span.start, "export")) |token| {
-                try self.edits.add_blank(token.span.start, token.span.end);
-            }
-        } else if (self.runtime != null and declaration.declaration != .null) {
-            const enum_declaration = switch (ctx.tree.data(declaration.declaration)) {
-                .ts_enum_declaration => |value| value,
-                else => null,
-            };
-            if (enum_declaration) |value| {
-                if (!value.declare) {
-                    const name = switch (ctx.tree.data(value.id)) {
-                        .binding_identifier => |identifier| ctx.tree.string(identifier.name),
-                        else => ctx.tree.source[ctx.tree.span(value.id).start..ctx.tree.span(value.id).end],
-                    };
-                    const entry = try self.exported_enums.getOrPut(self.edits.allocator, name);
-                    if (entry.found_existing) {
-                        const wrapper_span = ctx.tree.span(index);
-                        const enum_span = ctx.tree.span(declaration.declaration);
-                        if (self.tokens.find_forward(wrapper_span.start, enum_span.start, "export")) |token| {
-                            try self.edits.add_blank(token.span.start, token.span.end);
+        const inner = declaration.declaration;
+        if (self.runtime != null and inner != .null) {
+            if (namespace_semantics.is_supported_runtime_export_declaration(ctx.tree, inner) and
+                is_inside_runtime_namespace(ctx))
+            {
+                const wrapper_span = ctx.tree.span(index);
+                const declaration_span = ctx.tree.span(inner);
+                if (self.tokens.find_forward(wrapper_span.start, declaration_span.start, "export")) |token| {
+                    try self.edits.add_blank(token.span.start, token.span.end);
+                }
+            } else {
+                const enum_declaration = switch (ctx.tree.data(inner)) {
+                    .ts_enum_declaration => |value| value,
+                    else => null,
+                };
+                if (enum_declaration) |value| {
+                    if (!value.declare) {
+                        const name = switch (ctx.tree.data(value.id)) {
+                            .binding_identifier => |identifier| ctx.tree.string(identifier.name),
+                            else => ctx.tree.source[ctx.tree.span(value.id).start..ctx.tree.span(value.id).end],
+                        };
+                        const entry = try self.exported_enums.getOrPut(self.edits.allocator, name);
+                        if (entry.found_existing) {
+                            const wrapper_span = ctx.tree.span(index);
+                            const enum_span = ctx.tree.span(inner);
+                            if (self.tokens.find_forward(wrapper_span.start, enum_span.start, "export")) |token| {
+                                try self.edits.add_blank(token.span.start, token.span.end);
+                            }
                         }
                     }
                 }
@@ -1268,10 +1271,12 @@ test "eraser uses native spans for type syntax" {
 test "eraser removes whole type-only declarations" {
     const allocator = std.testing.allocator;
     const source =
-        "interface Box<T> { value: T }\n" ++
-        "type Name = string;\n" ++
-        "declare function load(): Name;\n" ++
-        "const value: Name = load();\n";
+        \\interface Box<T> { value: T }
+        \\type Name = string;
+        \\declare function load(): Name;
+        \\const value: Name = load();
+        \\
+    ;
     var tree = try parser.parse(allocator, source, .{
         .lang = .ts,
         .comments = .flat,
@@ -1297,10 +1302,12 @@ test "eraser removes whole type-only declarations" {
 test "whole-node erasure preserves an ASI statement boundary" {
     const allocator = std.testing.allocator;
     const source =
-        "run()\n" ++
-        "interface First {}\n" ++
-        "type Second = string\n" ++
-        "(next)();\n";
+        \\run()
+        \\interface First {}
+        \\type Second = string
+        \\(next)();
+        \\
+    ;
     var tree = try parser.parse(allocator, source, .{
         .lang = .ts,
         .comments = .flat,
@@ -1328,9 +1335,11 @@ test "whole-node erasure preserves an ASI statement boundary" {
 test "type-only namespaces erase while runtime namespaces remain for lowering" {
     const allocator = std.testing.allocator;
     const source =
-        "namespace Types { interface Item {} type Name = string }\n" ++
-        "namespace Nested { namespace Inner { interface Item {} } }\n" ++
-        "namespace Runtime { export const value = 1; interface Item {} }\n";
+        \\namespace Types { interface Item {} type Name = string }
+        \\namespace Nested { namespace Inner { interface Item {} } }
+        \\namespace Runtime { export const value = 1; interface Item {} }
+        \\
+    ;
     var tree = try parser.parse(allocator, source, .{
         .lang = .ts,
         .comments = .flat,
@@ -1355,19 +1364,21 @@ test "type-only namespaces erase while runtime namespaces remain for lowering" {
 test "eraser removes native class TypeScript syntax and ambient declarations" {
     const allocator = std.testing.allocator;
     const source =
-        "abstract class Box<T> extends Base<T> implements ReadonlyBox<T>, Named {\n" ++
-        "  public readonly value!: T;\n" ++
-        "  protected override method?(arg: T): void { return; }\n" ++
-        "  declare cached: T;\n" ++
-        "  abstract missing(): void;\n" ++
-        "  [key: string]: unknown;\n" ++
-        "}\n" ++
-        "declare class Ambient {}\n" ++
-        "declare const ambient: number;\n" ++
-        "declare enum AmbientEnum { A }\n" ++
-        "declare namespace Types { interface X {} }\n" ++
-        "import type Alias = Types.X;\n" ++
-        "export declare class Exported {}\n";
+        \\abstract class Box<T> extends Base<T> implements ReadonlyBox<T>, Named {
+        \\  public readonly value!: T;
+        \\  protected override method?(arg: T): void { return; }
+        \\  declare cached: T;
+        \\  abstract missing(): void;
+        \\  [key: string]: unknown;
+        \\}
+        \\declare class Ambient {}
+        \\declare const ambient: number;
+        \\declare enum AmbientEnum { A }
+        \\declare namespace Types { interface X {} }
+        \\import type Alias = Types.X;
+        \\export declare class Exported {}
+        \\
+    ;
     var tree = try parser.parse(allocator, source, .{
         .lang = .ts,
         .comments = .flat,
@@ -1392,17 +1403,19 @@ test "eraser removes native class TypeScript syntax and ambient declarations" {
     try std.testing.expect(std.mem.indexOf(u8, output, "override") == null);
     try std.testing.expect(std.mem.indexOf(u8, output, "declare") == null);
     try std.testing.expect(std.mem.indexOf(u8, output, "Ambient") == null);
-    try std.testing.expectEqual(@import("unicode.zig").utf16_width(source), @import("unicode.zig").utf16_width(output));
+    try std.testing.expectEqual(unicode.utf16_width(source), unicode.utf16_width(output));
 }
 
 test "eraser removes parameter and binding-only syntax" {
     const allocator = std.testing.allocator;
     const source =
-        "function f(this: void, value?: number): number { return value!; }\n" ++
-        "function only(this: void) {}\n" ++
-        "function trailing(this: void,) {}\n" ++
-        "let result!: number;\n" ++
-        "class C { constructor(public readonly x: number, protected override y: string) {} }\n";
+        \\function f(this: void, value?: number): number { return value!; }
+        \\function only(this: void) {}
+        \\function trailing(this: void,) {}
+        \\let result!: number;
+        \\class C { constructor(public readonly x: number, protected override y: string) {} }
+        \\
+    ;
     var tree = try parser.parse(allocator, source, .{
         .lang = .ts,
         .comments = .flat,
@@ -1429,17 +1442,19 @@ test "eraser removes parameter and binding-only syntax" {
     try std.testing.expect(std.mem.indexOf(u8, output, "?") == null);
     try std.testing.expect(std.mem.indexOf(u8, output, "!") == null);
     try std.testing.expectEqual(
-        @import("unicode.zig").utf16_width(source),
-        @import("unicode.zig").utf16_width(output),
+        unicode.utf16_width(source),
+        unicode.utf16_width(output),
     );
 }
 
 test "eraser removes type-only import and export list items" {
     const allocator = std.testing.allocator;
     const source =
-        "import type Default from \"types\";\n" ++
-        "import { type A, B, /* lead */ type C } from \"values\";\n" ++
-        "export { type A, B, type C };\n";
+        \\import type Default from "types";
+        \\import { type A, B, /* lead */ type C } from "values";
+        \\export { type A, B, type C };
+        \\
+    ;
     var tree = try parser.parse(allocator, source, .{
         .lang = .ts,
         .comments = .flat,
@@ -1464,10 +1479,12 @@ test "eraser removes type-only import and export list items" {
 test "eraser removes expression-level TypeScript wrappers" {
     const allocator = std.testing.allocator;
     const source =
-        "const a = value as string;\n" ++
-        "const b = value satisfies Constraint;\n" ++
-        "const c = value!;\n" ++
-        "const d = <number>value;\n";
+        \\const a = value as string;
+        \\const b = value satisfies Constraint;
+        \\const c = value!;
+        \\const d = <number>value;
+        \\
+    ;
     var tree = try parser.parse(allocator, source, .{
         .lang = .ts,
         .comments = .flat,
@@ -1512,8 +1529,10 @@ test "suffix assertions preserve ASI boundaries" {
 test "suffix assertions retain grouping on the left of exponentiation" {
     const allocator = std.testing.allocator;
     const source =
-        "const a = -value as number ** 2;\n" ++
-        "const b = -value as 𝒳 ** 2;\n";
+        \\const a = -value as number ** 2;
+        \\const b = -value as 𝒳 ** 2;
+        \\
+    ;
     var tree = try parser.parse(allocator, source, .{
         .lang = .ts,
         .comments = .flat,
@@ -1537,12 +1556,14 @@ test "suffix assertions retain grouping on the left of exponentiation" {
 test "multiline arrow corrections remain valid JavaScript" {
     const allocator = std.testing.allocator;
     const source =
-        "const generic = async <T>\n" ++
-        "(value: T): T => value;\n" ++
-        "function make() { return <T>\n" ++
-        "(value: T) => value; }\n" ++
-        "const typed = (value: number):\n" ++
-        "    number | string => value;\n";
+        \\const generic = async <T>
+        \\(value: T): T => value;
+        \\function make() { return <T>
+        \\(value: T) => value; }
+        \\const typed = (value: number):
+        \\    number | string => value;
+        \\
+    ;
     var tree = try parser.parse(allocator, source, .{
         .lang = .ts,
         .comments = .flat,
@@ -1557,8 +1578,8 @@ test "multiline arrow corrections remain valid JavaScript" {
     const output = try edits.render();
     defer allocator.free(output);
     try std.testing.expectEqual(
-        @import("unicode.zig").utf16_width(source),
-        @import("unicode.zig").utf16_width(output),
+        unicode.utf16_width(source),
+        unicode.utf16_width(output),
     );
 
     var reparsed = try parser.parse(allocator, output, .{
@@ -1591,8 +1612,8 @@ fn expect_strip(
     defer allocator.free(output);
     try std.testing.expectEqualStrings(expected, output);
     try std.testing.expectEqual(
-        @import("unicode.zig").utf16_width(original),
-        @import("unicode.zig").utf16_width(output),
+        unicode.utf16_width(original),
+        unicode.utf16_width(output),
     );
 }
 

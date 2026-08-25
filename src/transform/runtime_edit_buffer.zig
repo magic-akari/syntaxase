@@ -309,7 +309,7 @@ pub const RuntimeEditBuffer = struct {
             const final_line = layout.lines.items.len - 1;
             break :blk layout.local_line_ending(final_line);
         } else self.ensure_source_cursor().preferred_line_ending();
-        const has_trailing = output.items.len > 0 and ends_with_line_terminator(output.items);
+        const has_trailing = source_layout.ends_with_line_terminator(output.items);
         if (output.items.len > 0 and !has_trailing) {
             try output.appendSlice(output_allocator, ending);
         }
@@ -472,13 +472,6 @@ pub const RuntimeEditBuffer = struct {
     }
 };
 
-fn ends_with_line_terminator(text: []const u8) bool {
-    return std.mem.endsWith(u8, text, "\n") or
-        std.mem.endsWith(u8, text, "\r") or
-        std.mem.endsWith(u8, text, "\u{2028}") or
-        std.mem.endsWith(u8, text, "\u{2029}");
-}
-
 fn less_than_replacement(_: void, left: Replacement, right: Replacement) bool {
     if (left.span.start != right.span.start) return left.span.start < right.span.start;
     const left_insertion = left.span.start == left.span.end;
@@ -532,8 +525,8 @@ const ReplacementLinks = struct {
         defer stack.deinit(allocator);
 
         for (replacements, 0..) |replacement, index| {
-            while (stack.items.len > 0) {
-                const parent = replacements[stack.items[stack.items.len - 1]].span;
+            while (stack.getLastOrNull()) |parent_index| {
+                const parent = replacements[parent_index].span;
                 if (contains(parent, replacement.span)) break;
                 _ = stack.pop();
             }
@@ -543,7 +536,7 @@ const ReplacementLinks = struct {
                 if (last_root != none) result.next_sibling[last_root] = index;
                 last_root = index;
             } else {
-                const parent_index = stack.items[stack.items.len - 1];
+                const parent_index = stack.getLast();
                 if (result.first_child[parent_index] == none) {
                     result.first_child[parent_index] = index;
                 } else {
@@ -576,9 +569,11 @@ fn contains(parent: Span, child: Span) bool {
 test "runtime replacements compose against original fixed source ranges" {
     const allocator = std.testing.allocator;
     const source =
-        "const value: number = 1;\n" ++
-        "enum E { A }\n" ++
-        "const observed: E = E.A;\n";
+        \\const value: number = 1;
+        \\enum E { A }
+        \\const observed: E = E.A;
+        \\
+    ;
 
     var fixed_edits = fixed_edit_buffer.FixedEditBuffer.init(allocator, source);
     defer fixed_edits.deinit();

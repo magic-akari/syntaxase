@@ -141,11 +141,11 @@ pub const FixedEditBuffer = struct {
                     }
                 }
 
-                if (active_blank) |active| {
+                if (active_blank) |*active| {
                     if (span.start <= active.end) {
-                        active_blank.?.end = @max(active.end, span.end);
+                        active.end = @max(active.end, span.end);
                     } else {
-                        append_blank_assume_capacity(&result, active);
+                        append_blank_assume_capacity(&result, active.*);
                         active_blank = span;
                     }
                 } else {

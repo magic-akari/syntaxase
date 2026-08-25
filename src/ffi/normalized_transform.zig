@@ -2,26 +2,17 @@ const std = @import("std");
 const syntaxase = @import("syntaxase");
 
 pub const Mode = enum(u32) {
-    transform,
-    automatic,
-    automatic_development,
-    classic,
-    preserve,
-    strip_types,
-    strip_types_tsx,
+    transform = 0,
+    automatic = 1,
+    automatic_development = 2,
+    classic = 3,
+    preserve = 4,
+    strip_types = 5,
+    strip_types_tsx = 6,
 };
 
 pub fn parse_mode(raw_mode: u32) ?Mode {
-    return switch (raw_mode) {
-        0 => .transform,
-        1 => .automatic,
-        2 => .automatic_development,
-        3 => .classic,
-        4 => .preserve,
-        5 => .strip_types,
-        6 => .strip_types_tsx,
-        else => null,
-    };
+    return std.enums.fromInt(Mode, raw_mode);
 }
 
 pub fn run_into(

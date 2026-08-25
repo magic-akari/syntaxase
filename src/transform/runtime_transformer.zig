@@ -108,10 +108,7 @@ pub const RuntimeFeatureCollection = struct {
 
         switch (data) {
             .identifier_reference => {
-                const member = if (self.enum_member_stack.items.len > 0)
-                    self.enum_member_stack.items[self.enum_member_stack.items.len - 1]
-                else
-                    return;
+                const member = self.enum_member_stack.getLastOrNull() orelse return;
                 const entry = try self.enum_references.getOrPut(
                     self.allocator,
                     @intFromEnum(member),
@@ -125,18 +122,21 @@ pub const RuntimeFeatureCollection = struct {
             },
             .ts_import_equals_declaration => |declaration| {
                 if (declaration.import_kind == .type) return;
-                const parent = ctx.path.parent();
-                const exported = if (parent) |parent_index|
-                    switch (ctx.tree.data(parent_index)) {
-                        .export_named_declaration => |wrapper| wrapper.declaration == index,
-                        else => false,
+                const export_wrapper = if (ctx.path.parent()) |parent|
+                    switch (ctx.tree.data(parent)) {
+                        .export_named_declaration => |wrapper| if (wrapper.declaration == index)
+                            parent
+                        else
+                            null,
+                        else => null,
                     }
                 else
-                    false;
+                    null;
+                const exported = export_wrapper != null;
                 if (exported and nearest_runtime_namespace(ctx) != .null) return;
                 try self.import_equals.append(self.allocator, .{
                     .index = index,
-                    .replacement_index = if (exported) parent.? else index,
+                    .replacement_index = export_wrapper orelse index,
                     .exported = exported,
                 });
             },
@@ -339,10 +339,7 @@ pub const RuntimeFeatureCollection = struct {
         self: *RuntimeFeatureCollection,
         name: []const u8,
     ) void {
-        const frame = if (self.namespace_capture_stack.items.len > 0)
-            self.namespace_capture_stack.items[self.namespace_capture_stack.items.len - 1]
-        else
-            return;
+        const frame = self.namespace_capture_stack.getLastOrNull() orelse return;
         if (self.capture_barrier_depth != frame.barrier_depth) return;
         const task = &self.namespaces.items[frame.task_index];
         if (task.capture_risk) return;
@@ -354,8 +351,7 @@ pub const RuntimeFeatureCollection = struct {
         index: NodeIndex,
         name: []const u8,
     ) void {
-        if (self.namespace_capture_stack.items.len > 0) {
-            const frame = self.namespace_capture_stack.items[self.namespace_capture_stack.items.len - 1];
+        if (self.namespace_capture_stack.getLastOrNull()) |frame| {
             if (frame.declaration_id == index) return;
         }
         self.collect_active_namespace_capture(name);

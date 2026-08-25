@@ -268,32 +268,63 @@ fn transform_file_into(
     mode: TransformMode,
     output: *std.ArrayList(u8),
 ) Error!void {
-    const jsx: ?JSXConfig = switch (mode) {
-        .strip_types => null,
-        .transform => |config| config,
+    return switch (mode) {
+        .strip_types => strip_file_into(
+            scratch,
+            output_allocator,
+            file,
+            output,
+        ),
+        .transform => |jsx| lower_file_into(
+            scratch,
+            output_allocator,
+            file,
+            jsx,
+            output,
+        ),
     };
+}
+
+fn strip_file_into(
+    scratch: Allocator,
+    output_allocator: Allocator,
+    file: *SourceFile,
+    output: *std.ArrayList(u8),
+) Error!void {
+    var edits = fixed_edit_buffer.FixedEditBuffer.init(scratch, file.source());
+    defer edits.deinit();
+    try type_eraser.erase(&file.tree, file.token_cursor(), &edits);
+
+    var fixed = try edits.seal();
+    defer fixed.deinit();
+    try fixed.render_into(output, output_allocator);
+}
+
+fn lower_file_into(
+    scratch: Allocator,
+    output_allocator: Allocator,
+    file: *SourceFile,
+    jsx: JSXConfig,
+    output: *std.ArrayList(u8),
+) Error!void {
     var edits = fixed_edit_buffer.FixedEditBuffer.init(scratch, file.source());
     defer edits.deinit();
     var runtime_features = runtime_transformer.RuntimeFeatureCollection.init(
         scratch,
-        if (jsx) |config| config.lowers_jsx() else false,
+        jsx.lowers_jsx(),
     );
     defer runtime_features.deinit();
 
-    if (jsx != null) {
-        try type_eraser.erase_and_collect(
-            &file.tree,
-            file.token_cursor(),
-            &edits,
-            &runtime_features,
-        );
-        try runtime_features.finish_name_collection(&file.tree);
-    } else {
-        try type_eraser.erase(&file.tree, file.token_cursor(), &edits);
-    }
+    try type_eraser.erase_and_collect(
+        &file.tree,
+        file.token_cursor(),
+        &edits,
+        &runtime_features,
+    );
+    try runtime_features.finish_name_collection(&file.tree);
+
     var fixed = try edits.seal();
     defer fixed.deinit();
-    if (jsx == null) return fixed.render_into(output, output_allocator);
 
     const needs_layout = runtime_features.enums.items.len > 0;
     var runtime = if (needs_layout) blk: {
@@ -311,7 +342,7 @@ fn transform_file_into(
         &fixed,
         &runtime,
         &runtime_features,
-        jsx.?,
+        jsx,
     );
     try runtime.render_into(output, output_allocator);
 }
@@ -399,9 +430,11 @@ test "automatic JSX lowers attributes children entities and nested expressions" 
 test "automatic JSX handles key fallback development and name collisions" {
     const allocator = std.testing.allocator;
     const source =
-        "const _jsx = 1;\n" ++
-        "const before = <div key={id} {...props} />;\n" ++
-        "const after = <div {...props} key=\"id\" />;\n";
+        \\const _jsx = 1;
+        \\const before = <div key={id} {...props} />;
+        \\const after = <div {...props} key="id" />;
+        \\
+    ;
     var result = try transform(allocator, source, .{
         .jsx = .{ .automatic = .{ .import_source = "custom" } },
     });
@@ -449,12 +482,14 @@ test "automatic JSX helper names do not capture component tags" {
 test "reordered JSX spans retain line alignment through sparse anchors" {
     const allocator = std.testing.allocator;
     const source =
-        "const element = (\n" ++
-        "  <div\n" ++
-        "    key={<A />}\n" ++
-        "    {...{child: <B />}}\n" ++
-        "  />\n" ++
-        ");\n";
+        \\const element = (
+        \\  <div
+        \\    key={<A />}
+        \\    {...{child: <B />}}
+        \\  />
+        \\);
+        \\
+    ;
     var result = try transform(allocator, source, .{ .jsx = .{ .automatic = .{} } });
     defer result.deinit(allocator);
 
@@ -539,10 +574,12 @@ test "stripTypes preserves JavaScript UTF-16 width" {
 test "transform lowers a native Yuku enum while stripTypes does not" {
     const allocator = std.testing.allocator;
     const source =
-        "enum Foo {\n" ++
-        "  A,\n" ++
-        "  B = \"bee\",\n" ++
-        "}\n";
+        \\enum Foo {
+        \\  A,
+        \\  B = "bee",
+        \\}
+        \\
+    ;
     var transformed = try transform(allocator, source, .{});
     defer transformed.deinit(allocator);
     try std.testing.expectEqualStrings(
@@ -588,9 +625,11 @@ test "enum local planning uses Yuku Unicode identifier tables" {
 test "transform lowers import-equals through original Yuku spans" {
     const allocator = std.testing.allocator;
     const source =
-        "import A = require(\"./A\");\n" ++
-        "export import B = Namespace.B;\n" ++
-        "export import type Gone = require(\"gone\");\n";
+        \\import A = require("./A");
+        \\export import B = Namespace.B;
+        \\export import type Gone = require("gone");
+        \\
+    ;
     var result = try transform(allocator, source, .{});
     defer result.deinit(allocator);
 
@@ -605,8 +644,10 @@ test "transform lowers import-equals through original Yuku spans" {
 test "transform places parameter-property fields and assignments" {
     const allocator = std.testing.allocator;
     const source =
-        "class Point { constructor(public x: number) {} }\n" ++
-        "class D extends B { constructor(public x: number) { super(); } }\n";
+        \\class Point { constructor(public x: number) {} }
+        \\class D extends B { constructor(public x: number) { super(); } }
+        \\
+    ;
     var result = try transform(allocator, source, .{});
     defer result.deinit(allocator);
 

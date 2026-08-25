@@ -14,8 +14,10 @@ pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     if (args.len != 3) return error.InvalidArgument;
 
-    const action = parse_action(args[1]) orelse return error.InvalidArgument;
-    const mode = parse_mode(args[2]) orelse return error.InvalidArgument;
+    const action = std.meta.stringToEnum(Action, args[1]) orelse
+        return error.InvalidArgument;
+    const mode = std.meta.stringToEnum(Mode, args[2]) orelse
+        return error.InvalidArgument;
 
     var stdin_buffer: [4096]u8 = undefined;
     var stdin_reader = std.Io.File.stdin().reader(io, &stdin_buffer);
@@ -26,18 +28,6 @@ pub fn main(init: std.process.Init) !void {
         .inspect => try inspect(io, allocator, source, mode),
         .measure => try measure(io, allocator, source, mode),
     }
-}
-
-fn parse_action(value: []const u8) ?Action {
-    if (std.mem.eql(u8, value, "inspect")) return .inspect;
-    if (std.mem.eql(u8, value, "measure")) return .measure;
-    return null;
-}
-
-fn parse_mode(value: []const u8) ?Mode {
-    if (std.mem.eql(u8, value, "strip")) return .strip;
-    if (std.mem.eql(u8, value, "jsx")) return .jsx;
-    return null;
 }
 
 fn inspect(

@@ -1,5 +1,6 @@
 const std = @import("std");
 const parser = @import("parser");
+const source_layout = @import("source_layout.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -27,7 +28,9 @@ pub const CommentCursor = struct {
             try output.appendSlice(allocator, self.source[comment.span.start..comment.span.end]);
             if (comment.type != .line) continue;
 
-            const terminator = line_terminator_at(self.source, comment.span.end, end);
+            const terminator = source_layout.line_terminator_prefix(
+                self.source[comment.span.end..end],
+            ).bytes();
             try output.appendSlice(allocator, if (terminator.len > 0) terminator else "\n");
         }
     }
@@ -46,17 +49,6 @@ pub const CommentCursor = struct {
         return low;
     }
 };
-
-fn line_terminator_at(source: []const u8, start: u32, end: u32) []const u8 {
-    if (start >= end) return "";
-    const remaining = source[start..end];
-    if (std.mem.startsWith(u8, remaining, "\r\n")) return "\r\n";
-    if (std.mem.startsWith(u8, remaining, "\r")) return "\r";
-    if (std.mem.startsWith(u8, remaining, "\n")) return "\n";
-    if (std.mem.startsWith(u8, remaining, "\u{2028}")) return "\u{2028}";
-    if (std.mem.startsWith(u8, remaining, "\u{2029}")) return "\u{2029}";
-    return "";
-}
 
 test "comment cursor starts at the requested range" {
     const allocator = std.testing.allocator;
