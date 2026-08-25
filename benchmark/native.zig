@@ -140,7 +140,7 @@ fn transform_once(
     mode: Mode,
 ) !syntaxase.TransformResult {
     return switch (mode) {
-        .strip => syntaxase.stripTypes(allocator, source),
+        .strip => syntaxase.stripTypes(allocator, source, .{}),
         .jsx => syntaxase.transform(allocator, source, .{
             .jsx = .{ .automatic = .{} },
         }),

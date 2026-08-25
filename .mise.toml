@@ -98,9 +98,9 @@ napi-zig bump --no-push
 """
 
 [tasks."test:zig"]
-description = "Run the native Zig correctness tests"
+description = "Build every native entry point and run the Zig correctness tests"
 depends = ["deps:zig"]
-run = "zig build test"
+run = ["zig build", "zig build benchmark-native", "zig build test"]
 
 [tasks."test:napi"]
 description = "Build and test the current platform's Node-API package"
