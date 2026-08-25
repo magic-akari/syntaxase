@@ -583,18 +583,15 @@ const Visitor = struct {
             property_span.start,
         );
 
-        var first_modifier_start = key_span.start;
-        var has_removable_modifier = false;
+        var first_modifier_start: ?u32 = null;
         if (property.readonly) {
             if (try self.erase_keyword(search_start, key_span.start, "readonly")) |start| {
-                first_modifier_start = @min(first_modifier_start, start);
-                has_removable_modifier = true;
+                first_modifier_start = earliest_position(first_modifier_start, start);
             }
         }
         if (property.override) {
             if (try self.erase_keyword(search_start, key_span.start, "override")) |start| {
-                first_modifier_start = @min(first_modifier_start, start);
-                has_removable_modifier = true;
+                first_modifier_start = earliest_position(first_modifier_start, start);
             }
         }
         if (property.accessibility != .none) {
@@ -603,14 +600,20 @@ const Visitor = struct {
                 key_span.start,
                 property.accessibility.toString(),
             )) |start| {
-                first_modifier_start = @min(first_modifier_start, start);
-                has_removable_modifier = true;
+                first_modifier_start = earliest_position(first_modifier_start, start);
             }
         }
 
-        if (property.computed and has_removable_modifier and property.decorators.len == 0) {
-            try self.edits.add_substitution(first_modifier_start, .semicolon);
-        }
+        const key_token = self.tokens.first_in_range(key_span.start, key_span.end);
+        const hazardous_key = property.computed or self.is_hazardous_class_key(key_token);
+        try self.separate_hazardous_class_element(
+            index,
+            property_span,
+            first_modifier_start,
+            hazardous_key,
+            property.static or property.accessor or property.decorators.len > 0,
+            ctx,
+        );
 
         var marker_end = property_span.end;
         if (property.type_annotation != .null) {
@@ -625,6 +628,7 @@ const Visitor = struct {
         if (property.definite) {
             try self.erase_punctuation(key_span.end, marker_end, "!");
         }
+        try self.preserve_keyword_named_class_field(property, key_span, ctx);
     }
 
     fn erase_method_syntax(
@@ -640,12 +644,10 @@ const Visitor = struct {
             method.decorators,
             method_span.start,
         );
-        var first_modifier_start = key_span.start;
-        var has_removable_modifier = false;
+        var first_modifier_start: ?u32 = null;
         if (method.override) {
             if (try self.erase_keyword(search_start, key_span.start, "override")) |start| {
-                first_modifier_start = @min(first_modifier_start, start);
-                has_removable_modifier = true;
+                first_modifier_start = earliest_position(first_modifier_start, start);
             }
         }
         if (method.accessibility != .none) {
@@ -654,17 +656,73 @@ const Visitor = struct {
                 key_span.start,
                 method.accessibility.toString(),
             )) |start| {
-                first_modifier_start = @min(first_modifier_start, start);
-                has_removable_modifier = true;
+                first_modifier_start = earliest_position(first_modifier_start, start);
             }
         }
-        if (method.computed and has_removable_modifier and method.decorators.len == 0) {
-            try self.edits.add_substitution(first_modifier_start, .semicolon);
-        }
+        const function = switch (ctx.tree.data(method.value)) {
+            .function => |value| value,
+            else => unreachable,
+        };
+        const key_token = self.tokens.first_in_range(key_span.start, key_span.end);
+        const hazardous_key = method.computed or
+            function.generator or
+            self.is_hazardous_class_key(key_token);
+        try self.separate_hazardous_class_element(
+            index,
+            method_span,
+            first_modifier_start,
+            hazardous_key,
+            method.static or method.decorators.len > 0,
+            ctx,
+        );
         if (method.optional) {
             const function_start = ctx.tree.span(method.value).start;
             try self.erase_punctuation(key_span.end, function_start, "?");
         }
+    }
+
+    fn separate_hazardous_class_element(
+        self: *Visitor,
+        index: NodeIndex,
+        member_span: parser.ast.Span,
+        first_erased_modifier: ?u32,
+        hazardous_key: bool,
+        protected_by_javascript_syntax: bool,
+        ctx: *Ctx,
+    ) Allocator.Error!void {
+        if (!hazardous_key or protected_by_javascript_syntax) return;
+        if (first_erased_modifier != member_span.start) return;
+        if (!needs_semicolon_before_erasure(index, ctx, self.tokens.source)) return;
+
+        try self.edits.add_substitution(member_span.start, .semicolon);
+    }
+
+    fn is_hazardous_class_key(
+        self: *const Visitor,
+        token: ?parser.ast.Token,
+    ) bool {
+        const key = token orelse return false;
+        const text = self.tokens.text(key);
+        return std.mem.eql(u8, text, "in") or std.mem.eql(u8, text, "instanceof");
+    }
+
+    fn preserve_keyword_named_class_field(
+        self: *Visitor,
+        property: parser.ast.PropertyDefinition,
+        key_span: parser.ast.Span,
+        ctx: *Ctx,
+    ) Allocator.Error!void {
+        if (property.value != .null or property.type_annotation == .null) return;
+
+        const key = self.tokens.first_in_range(key_span.start, key_span.end) orelse return;
+        const key_text = self.tokens.text(key);
+        const is_contextual_keyword = std.mem.eql(u8, key_text, "get") or
+            std.mem.eql(u8, key_text, "set") or
+            std.mem.eql(u8, key_text, "static");
+        if (!is_contextual_keyword) return;
+
+        const annotation_start = ctx.tree.span(property.type_annotation).start;
+        try self.edits.add_substitution(annotation_start, .semicolon);
     }
 
     fn erase_keyword(
@@ -1140,6 +1198,10 @@ fn last_decorator_end(
     return tree.span(indices[indices.len - 1]).end;
 }
 
+fn earliest_position(current: ?u32, candidate: u32) u32 {
+    return if (current) |position| @min(position, candidate) else candidate;
+}
+
 fn pattern_type_annotation(tree: *const parser.ast.Tree, index: NodeIndex) NodeIndex {
     return switch (tree.data(index)) {
         .binding_identifier => |pattern| pattern.type_annotation,
@@ -1506,4 +1568,1375 @@ test "multiline arrow corrections remain valid JavaScript" {
     });
     defer reparsed.deinit();
     try std.testing.expect(!reparsed.hasErrors());
+}
+
+fn expect_strip(
+    lang: parser.ast.Lang,
+    original: []const u8,
+    expected: []const u8,
+) !void {
+    const allocator = std.testing.allocator;
+    var tree = try parser.parse(allocator, original, .{
+        .lang = lang,
+        .comments = .flat,
+        .tokens = true,
+    });
+    defer tree.deinit();
+
+    var edits = fixed_edit_buffer.FixedEditBuffer.init(allocator, original);
+    defer edits.deinit();
+    try erase(&tree, token_cursor.TokenCursor.init(original, tree.tokens), &edits);
+
+    const output = try edits.render();
+    defer allocator.free(output);
+    try std.testing.expectEqualStrings(expected, output);
+    try std.testing.expectEqual(
+        @import("unicode.zig").utf16_width(original),
+        @import("unicode.zig").utf16_width(output),
+    );
+}
+
+test "strip: annotations.variable_type_annotation" {
+    try expect_strip(
+        .ts,
+        "let value: number = 1;",
+        "let value         = 1;",
+    );
+}
+
+test "strip: annotations.function_parameter_type_annotation" {
+    try expect_strip(
+        .ts,
+        "function f(value: number) {}",
+        "function f(value        ) {}",
+    );
+}
+
+test "strip: annotations.function_return_type_annotation" {
+    try expect_strip(
+        .ts,
+        "function f(): number {}",
+        "function f()         {}",
+    );
+}
+
+test "strip: annotations.function_expression_parameter_type_annotation" {
+    try expect_strip(
+        .ts,
+        "const f = function(value: Type) {};",
+        "const f = function(value      ) {};",
+    );
+}
+
+test "strip: annotations.function_expression_return_type_annotation" {
+    try expect_strip(
+        .ts,
+        "const f = function(): Type {};",
+        "const f = function()       {};",
+    );
+}
+
+test "strip: annotations.arrow_parameter_type_annotation" {
+    try expect_strip(
+        .ts,
+        "const f = (value: Type) => value;",
+        "const f = (value      ) => value;",
+    );
+}
+
+test "strip: annotations.arrow_return_type_annotation" {
+    try expect_strip(
+        .ts,
+        "const f = (): Type => value;",
+        "const f = ()       => value;",
+    );
+}
+
+test "strip: annotations.constructor_parameter_type_annotation" {
+    try expect_strip(
+        .ts,
+        "class C { constructor(value: Type) {} }",
+        "class C { constructor(value      ) {} }",
+    );
+}
+
+test "strip: annotations.default_parameter_type_annotation" {
+    try expect_strip(
+        .ts,
+        "function f(value: Type = initial) {}",
+        "function f(value       = initial) {}",
+    );
+}
+
+test "strip: annotations.rest_parameter_type_annotation" {
+    try expect_strip(
+        .ts,
+        "function f(...values: Type[]) {}",
+        "function f(...values        ) {}",
+    );
+}
+
+test "strip: annotations.object_binding_type_annotation" {
+    try expect_strip(
+        .ts,
+        "const { value }: Shape = input;",
+        "const { value }        = input;",
+    );
+}
+
+test "strip: annotations.array_binding_type_annotation" {
+    try expect_strip(
+        .ts,
+        "const [value]: Items = input;",
+        "const [value]        = input;",
+    );
+}
+
+test "strip: annotations.object_parameter_type_annotation" {
+    try expect_strip(
+        .ts,
+        "function f({ value }: Shape) {}",
+        "function f({ value }       ) {}",
+    );
+}
+
+test "strip: annotations.catch_binding_type_annotation" {
+    try expect_strip(
+        .ts,
+        "try {} catch (error: unknown) {}",
+        "try {} catch (error         ) {}",
+    );
+}
+
+test "strip: annotations.object_method_parameter_type_annotation" {
+    try expect_strip(
+        .ts,
+        "const object = { method(value: number) {} };",
+        "const object = { method(value        ) {} };",
+    );
+}
+
+test "strip: annotations.object_method_return_type_annotation" {
+    try expect_strip(
+        .ts,
+        "const object = { method(): number { return 1; } };",
+        "const object = { method()         { return 1; } };",
+    );
+}
+
+test "strip: annotations.object_getter_return_type_annotation" {
+    try expect_strip(
+        .ts,
+        "const object = { get value(): number { return 1; } };",
+        "const object = { get value()         { return 1; } };",
+    );
+}
+
+test "strip: annotations.object_setter_parameter_type_annotation" {
+    try expect_strip(
+        .ts,
+        "const object = { set value(input: number) {} };",
+        "const object = { set value(input        ) {} };",
+    );
+}
+
+test "strip: annotations.class_method_parameter_type_annotation" {
+    try expect_strip(
+        .ts,
+        "class C { method(value: Type) {} }",
+        "class C { method(value      ) {} }",
+    );
+}
+
+test "strip: annotations.class_method_return_type_annotation" {
+    try expect_strip(
+        .ts,
+        "class C { method(): Type {} }",
+        "class C { method()       {} }",
+    );
+}
+
+test "strip: annotations.class_getter_return_type_annotation" {
+    try expect_strip(
+        .ts,
+        "class C { get value(): Type { return input; } }",
+        "class C { get value()       { return input; } }",
+    );
+}
+
+test "strip: annotations.class_setter_parameter_type_annotation" {
+    try expect_strip(
+        .ts,
+        "class C { set value(input: Type) {} }",
+        "class C { set value(input      ) {} }",
+    );
+}
+
+test "strip: annotations.class_field_type_annotation" {
+    try expect_strip(
+        .ts,
+        "class C { value: number = 1; }",
+        "class C { value         = 1; }",
+    );
+}
+
+test "strip: annotations.auto_accessor_type_annotation" {
+    try expect_strip(
+        .ts,
+        "class C { accessor value: Type; }",
+        "class C { accessor value      ; }",
+    );
+}
+
+test "strip: annotations.nested_generic_type_annotation" {
+    try expect_strip(
+        .ts,
+        "let value: Box<Item> = input;",
+        "let value            = input;",
+    );
+}
+
+test "strip: annotations.multiline_arrow_return_type" {
+    try expect_strip(
+        .ts,
+        "const f = ():\nnumber => 1;",
+        "const f = (  \n     ) => 1;",
+    );
+}
+
+test "strip: annotations.astral_string_literal_return_type_preserves_utf16_width" {
+    try expect_strip(
+        .ts,
+        "function f(): '💥' {}",
+        "function f()       {}",
+    );
+}
+
+test "strip: asi.unterminated_expression_before_type_alias" {
+    try expect_strip(
+        .ts,
+        "foo\ntype T = string;\n(1);",
+        "foo\n;               \n(1);",
+    );
+}
+
+test "strip: asi.terminated_expression_before_type_alias" {
+    try expect_strip(
+        .ts,
+        "foo;\ntype T = string;\n(1);",
+        "foo;\n                \n(1);",
+    );
+}
+
+test "strip: asi.type_alias_as_if_statement_body" {
+    try expect_strip(
+        .ts,
+        "if (ok)\n    type T = string;\nrun();",
+        "if (ok)\n    ;               \nrun();",
+    );
+}
+
+test "strip: asi.type_alias_as_else_statement_body" {
+    try expect_strip(
+        .ts,
+        "if (ok) run();\nelse type T = string;\nafter();",
+        "if (ok) run();\nelse ;               \nafter();",
+    );
+}
+
+test "strip: asi.interface_as_while_statement_body" {
+    try expect_strip(
+        .ts,
+        "while (ok)\n    interface I {}\nafter();",
+        "while (ok)\n    ;             \nafter();",
+    );
+}
+
+test "strip: asi.type_alias_as_for_statement_body" {
+    try expect_strip(
+        .ts,
+        "for (;;)\n    type T = string;\nafter();",
+        "for (;;)\n    ;               \nafter();",
+    );
+}
+
+test "strip: asi.interface_as_labeled_statement_body" {
+    try expect_strip(
+        .ts,
+        "label: interface I {}\nafter();",
+        "label: ;             \nafter();",
+    );
+}
+
+test "strip: asi.interface_as_do_while_statement_body" {
+    try expect_strip(
+        .ts,
+        "do\n    interface I {}\nwhile (ok);",
+        "do\n    ;             \nwhile (ok);",
+    );
+}
+
+test "strip: asi.suffix_assertion_before_parenthesized_statement" {
+    try expect_strip(
+        .ts,
+        "value as string\n(next)();",
+        "value;         \n(next)();",
+    );
+}
+
+test "strip: asi.suffix_assertion_with_trailing_comment_before_parenthesized_statement" {
+    try expect_strip(
+        .ts,
+        "value as Type/* comment */\n(next)();",
+        "value;       /* comment */\n(next)();",
+    );
+}
+
+test "strip: asi.satisfies_assertion_before_computed_statement" {
+    try expect_strip(
+        .ts,
+        "value satisfies Type\n[next]();",
+        "value;              \n[next]();",
+    );
+}
+
+test "strip: asi.consecutive_type_declarations_preserve_following_directive" {
+    try expect_strip(
+        .ts,
+        "interface A {}\ntype B = string;\n'use strict';",
+        "              \n                \n'use strict';",
+    );
+}
+
+test "strip: asi.erased_class_modifier_separates_computed_field" {
+    try expect_strip(
+        .ts,
+        "class C { first = 1\npublic ['second'] = 2; }",
+        "class C { first = 1\n;      ['second'] = 2; }",
+    );
+}
+
+test "strip: asi.suffix_assertion_separates_computed_class_member" {
+    try expect_strip(
+        .ts,
+        "class C { value = input as Type\n['next']() {} }",
+        "class C { value = input;       \n['next']() {} }",
+    );
+}
+
+test "strip: asi.suffix_assertion_before_binary_continuation_stays_connected" {
+    try expect_strip(
+        .ts,
+        "value as Type\n+ next;",
+        "value        \n+ next;",
+    );
+}
+
+test "strip: bindings.optional_parameter_marker" {
+    try expect_strip(
+        .ts,
+        "function f(value?: number) {}",
+        "function f(value         ) {}",
+    );
+}
+
+test "strip: bindings.optional_parameter_marker_after_comment" {
+    try expect_strip(
+        .ts,
+        "const f = (value/** doc */?: Type) => value;",
+        "const f = (value/** doc */       ) => value;",
+    );
+}
+
+test "strip: bindings.optional_destructured_parameter_marker" {
+    try expect_strip(
+        .ts,
+        "function f({ value }?: Shape) {}",
+        "function f({ value }        ) {}",
+    );
+}
+
+test "strip: bindings.optional_array_parameter_marker" {
+    try expect_strip(
+        .ts,
+        "function f([value]?: Items) {}",
+        "function f([value]        ) {}",
+    );
+}
+
+test "strip: bindings.variable_definite_assignment_marker" {
+    try expect_strip(
+        .ts,
+        "let value!: number;",
+        "let value         ;",
+    );
+}
+
+test "strip: bindings.explicit_this_parameter_only" {
+    try expect_strip(
+        .ts,
+        "function f(this: void) {}",
+        "function f(          ) {}",
+    );
+}
+
+test "strip: bindings.explicit_this_parameter_before_value_parameter" {
+    try expect_strip(
+        .ts,
+        "function f(this: void, value: number) {}",
+        "function f(            value        ) {}",
+    );
+}
+
+test "strip: bindings.explicit_this_parameter_with_trailing_comma" {
+    try expect_strip(
+        .ts,
+        "function f(this: void,) {}",
+        "function f(           ) {}",
+    );
+}
+
+test "strip: bindings.explicit_this_parameter_before_rest_parameter" {
+    try expect_strip(
+        .ts,
+        "function f(this: void, ...values: Type[]) {}",
+        "function f(            ...values        ) {}",
+    );
+}
+
+test "strip: classes.abstract_class_modifier" {
+    try expect_strip(
+        .ts,
+        "abstract class C {}",
+        "         class C {}",
+    );
+}
+
+test "strip: classes.public_field_modifier" {
+    try expect_strip(
+        .ts,
+        "class C { public value = 1; }",
+        "class C {        value = 1; }",
+    );
+}
+
+test "strip: classes.readonly_field_modifier" {
+    try expect_strip(
+        .ts,
+        "class C { readonly value = 1; }",
+        "class C {          value = 1; }",
+    );
+}
+
+test "strip: classes.override_method_modifier" {
+    try expect_strip(
+        .ts,
+        "class C { override method() {} }",
+        "class C {          method() {} }",
+    );
+}
+
+test "strip: classes.private_field_modifier" {
+    try expect_strip(
+        .ts,
+        "class C { private value = 1; }",
+        "class C {         value = 1; }",
+    );
+}
+
+test "strip: classes.protected_method_modifier" {
+    try expect_strip(
+        .ts,
+        "class C { protected method() {} }",
+        "class C {           method() {} }",
+    );
+}
+
+test "strip: classes.override_field_modifier" {
+    try expect_strip(
+        .ts,
+        "class C { override value = 1; }",
+        "class C {          value = 1; }",
+    );
+}
+
+test "strip: classes.class_extends_type_arguments" {
+    try expect_strip(
+        .ts,
+        "class C extends Base<Type> {}",
+        "class C extends Base       {}",
+    );
+}
+
+test "strip: classes.class_implements_clause" {
+    try expect_strip(
+        .ts,
+        "class C implements A, B {}",
+        "class C                 {}",
+    );
+}
+
+test "strip: classes.generic_class_implements_clause" {
+    try expect_strip(
+        .ts,
+        "class C<T> implements A<T> {}",
+        "class C                    {}",
+    );
+}
+
+test "strip: classes.optional_field_marker" {
+    try expect_strip(
+        .ts,
+        "class C { value?: number; }",
+        "class C { value         ; }",
+    );
+}
+
+test "strip: classes.definite_field_marker" {
+    try expect_strip(
+        .ts,
+        "class C { value!: number; }",
+        "class C { value         ; }",
+    );
+}
+
+test "strip: classes.optional_method_marker" {
+    try expect_strip(
+        .ts,
+        "class C { method?(): void {} }",
+        "class C { method ()       {} }",
+    );
+}
+
+test "strip: classes.optional_generic_method" {
+    try expect_strip(
+        .ts,
+        "class C { method?<T>(): void {} }",
+        "class C { method    ()       {} }",
+    );
+}
+
+test "strip: classes.abstract_property_declaration" {
+    try expect_strip(
+        .ts,
+        "class C { abstract value: number; next = 1; }",
+        "class C {                         next = 1; }",
+    );
+}
+
+test "strip: classes.declared_property_declaration" {
+    try expect_strip(
+        .ts,
+        "class C { declare value: Type; next = 1; }",
+        "class C {                      next = 1; }",
+    );
+}
+
+test "strip: classes.abstract_method_declaration" {
+    try expect_strip(
+        .ts,
+        "class C { abstract method(): Type; next() {} }",
+        "class C {                          next() {} }",
+    );
+}
+
+test "strip: classes.method_overload_signature" {
+    try expect_strip(
+        .ts,
+        "class C { method(value: string): string; method(value: string) {} }",
+        "class C {                                method(value        ) {} }",
+    );
+}
+
+test "strip: classes.class_index_signature" {
+    try expect_strip(
+        .ts,
+        "class C { [key: string]: number; next = 1; }",
+        "class C {                        next = 1; }",
+    );
+}
+
+test "strip: classes.erased_modifier_before_static_computed_method_needs_no_separator" {
+    try expect_strip(
+        .ts,
+        "class C { first = 1\npublic static ['second']() {} }",
+        "class C { first = 1\n       static ['second']() {} }",
+    );
+}
+
+test "strip: classes.erased_modifier_separates_generator_method" {
+    try expect_strip(
+        .ts,
+        "class C { first = 1\npublic *next() {} }",
+        "class C { first = 1\n;      *next() {} }",
+    );
+}
+
+test "strip: classes.erased_modifier_separates_in_field" {
+    try expect_strip(
+        .ts,
+        "class C { first = 1\npublic in; }",
+        "class C { first = 1\n;      in; }",
+    );
+}
+
+test "strip: classes.get_named_field_keeps_field_boundary" {
+    try expect_strip(
+        .ts,
+        "class C { get: Type\nnext() {} }",
+        "class C { get;     \nnext() {} }",
+    );
+}
+
+test "strip: classes.set_named_field_keeps_field_boundary" {
+    try expect_strip(
+        .ts,
+        "class C { set: Type\nnext() {} }",
+        "class C { set;     \nnext() {} }",
+    );
+}
+
+test "strip: classes.static_named_field_keeps_field_boundary" {
+    try expect_strip(
+        .ts,
+        "class C { static: Type\nnext() {} }",
+        "class C { static;     \nnext() {} }",
+    );
+}
+
+test "strip: classes.decorator_separates_computed_method_after_modifier_erasure" {
+    try expect_strip(
+        .ts,
+        "class C { first = 1\n@dec public ['second']() {} }",
+        "class C { first = 1\n@dec        ['second']() {} }",
+    );
+}
+
+test "strip: declarations.type_alias_declaration" {
+    try expect_strip(
+        .ts,
+        "type T = string;\nrun();",
+        "                \nrun();",
+    );
+}
+
+test "strip: declarations.interface_declaration" {
+    try expect_strip(
+        .ts,
+        "interface I {}\nrun();",
+        "              \nrun();",
+    );
+}
+
+test "strip: declarations.exported_interface_declaration" {
+    try expect_strip(
+        .ts,
+        "export interface I {}\nrun();",
+        "                     \nrun();",
+    );
+}
+
+test "strip: declarations.namespace_export_declaration" {
+    try expect_strip(
+        .ts,
+        "export as namespace Lib;\nrun();",
+        "                        \nrun();",
+    );
+}
+
+test "strip: declarations.ambient_variable_declaration" {
+    try expect_strip(
+        .ts,
+        "declare const value: number;\nrun();",
+        "                            \nrun();",
+    );
+}
+
+test "strip: declarations.ambient_class_declaration" {
+    try expect_strip(
+        .ts,
+        "declare class C {}\nrun();",
+        "                  \nrun();",
+    );
+}
+
+test "strip: declarations.exported_ambient_class_declaration" {
+    try expect_strip(
+        .ts,
+        "export declare class C {}\nrun();",
+        "                         \nrun();",
+    );
+}
+
+test "strip: declarations.ambient_function_declaration" {
+    try expect_strip(
+        .ts,
+        "declare function f(): void;\nrun();",
+        "                           \nrun();",
+    );
+}
+
+test "strip: declarations.exported_ambient_function_declaration" {
+    try expect_strip(
+        .ts,
+        "export declare function f(): void;\nrun();",
+        "                                  \nrun();",
+    );
+}
+
+test "strip: declarations.exported_function_overload_signature" {
+    try expect_strip(
+        .ts,
+        "export function f(): void;\nexport function f() {}",
+        "                          \nexport function f() {}",
+    );
+}
+
+test "strip: declarations.function_overload_signature" {
+    try expect_strip(
+        .ts,
+        "function f(): void;\nfunction f() {}",
+        "                   \nfunction f() {}",
+    );
+}
+
+test "strip: declarations.ambient_enum_declaration" {
+    try expect_strip(
+        .ts,
+        "declare enum E {}\nrun();",
+        "                 \nrun();",
+    );
+}
+
+test "strip: declarations.exported_ambient_enum_declaration" {
+    try expect_strip(
+        .ts,
+        "export declare enum E {}\nrun();",
+        "                        \nrun();",
+    );
+}
+
+test "strip: declarations.ambient_namespace_declaration" {
+    try expect_strip(
+        .ts,
+        "declare namespace N { const value: number; }\nrun();",
+        "                                            \nrun();",
+    );
+}
+
+test "strip: declarations.exported_ambient_namespace_declaration" {
+    try expect_strip(
+        .ts,
+        "export declare namespace N {}\nrun();",
+        "                             \nrun();",
+    );
+}
+
+test "strip: declarations.exported_ambient_variable_declaration" {
+    try expect_strip(
+        .ts,
+        "export declare const value: number;\nrun();",
+        "                                   \nrun();",
+    );
+}
+
+test "strip: declarations.type_only_namespace_declaration" {
+    try expect_strip(
+        .ts,
+        "namespace N { export type T = string; }\nrun();",
+        "                                       \nrun();",
+    );
+}
+
+test "strip: declarations.qualified_type_only_namespace_declaration" {
+    try expect_strip(
+        .ts,
+        "namespace A.B { type T = string; }\nrun();",
+        "                                  \nrun();",
+    );
+}
+
+test "strip: declarations.empty_namespace_declaration" {
+    try expect_strip(
+        .ts,
+        "namespace N {}\nrun();",
+        "              \nrun();",
+    );
+}
+
+test "strip: declarations.namespace_with_local_import_alias" {
+    try expect_strip(
+        .ts,
+        "namespace N { import x = A.x; }\nrun();",
+        "                               \nrun();",
+    );
+}
+
+test "strip: declarations.ambient_external_module_declaration" {
+    try expect_strip(
+        .ts,
+        "declare module 'pkg' { const value: number; }\nrun();",
+        "                                             \nrun();",
+    );
+}
+
+test "strip: declarations.global_augmentation_declaration" {
+    try expect_strip(
+        .ts,
+        "declare global { interface Window {} }\nrun();",
+        "                                      \nrun();",
+    );
+}
+
+test "strip: declarations.default_exported_interface_declaration" {
+    try expect_strip(
+        .ts,
+        "export default interface I {}\nrun();",
+        "                             \nrun();",
+    );
+}
+
+test "strip: diagnostics.type_only_import_equals" {
+    try expect_strip(
+        .ts,
+        "import type Model = require('model');\nrun();",
+        "                                     \nrun();",
+    );
+}
+
+test "strip: expressions.as_expression" {
+    try expect_strip(
+        .ts,
+        "const x = value as string;",
+        "const x = value          ;",
+    );
+}
+
+test "strip: expressions.const_assertion" {
+    try expect_strip(
+        .ts,
+        "const value = [1, 2] as const;",
+        "const value = [1, 2]         ;",
+    );
+}
+
+test "strip: expressions.satisfies_expression" {
+    try expect_strip(
+        .ts,
+        "const x = value satisfies Type;",
+        "const x = value               ;",
+    );
+}
+
+test "strip: expressions.non_null_expression" {
+    try expect_strip(
+        .ts,
+        "const x = value!;",
+        "const x = value ;",
+    );
+}
+
+test "strip: expressions.chained_non_null_expressions" {
+    try expect_strip(
+        .ts,
+        "const value = expr!!!;",
+        "const value = expr   ;",
+    );
+}
+
+test "strip: expressions.non_null_between_as_and_satisfies_expressions" {
+    try expect_strip(
+        .ts,
+        "const value = (expr as A)! satisfies B;",
+        "const value = (expr     )             ;",
+    );
+}
+
+test "strip: expressions.non_null_after_instantiation_before_as_expression" {
+    try expect_strip(
+        .ts,
+        "const value = (fn<A>)! as B;",
+        "const value = (fn   )      ;",
+    );
+}
+
+test "strip: expressions.non_null_expressions_in_assignment_target" {
+    try expect_strip(
+        .ts,
+        "[left!, right!] = values;",
+        "[left , right ] = values;",
+    );
+}
+
+test "strip: expressions.as_expression_in_assignment_target" {
+    try expect_strip(
+        .ts,
+        "[left as Type] = values;",
+        "[left        ] = values;",
+    );
+}
+
+test "strip: expressions.satisfies_expression_in_assignment_target" {
+    try expect_strip(
+        .ts,
+        "[left satisfies Type] = values;",
+        "[left               ] = values;",
+    );
+}
+
+test "strip: expressions.non_null_instantiation_expression" {
+    try expect_strip(
+        .ts,
+        "const value = (make!)<Type>;",
+        "const value = (make )      ;",
+    );
+}
+
+test "strip: expressions.non_null_generic_call_with_non_null_argument" {
+    try expect_strip(
+        .ts,
+        "const value = (fn!)<T>(argument!);",
+        "const value = (fn )   (argument );",
+    );
+}
+
+test "strip: expressions.non_null_optional_call_with_type_arguments" {
+    try expect_strip(
+        .ts,
+        "fn!?.<Type>(value);",
+        "fn ?.      (value);",
+    );
+}
+
+test "strip: expressions.non_null_new_expression_with_type_arguments" {
+    try expect_strip(
+        .ts,
+        "const value = new (Map!)<Key, Value>();",
+        "const value = new (Map )            ();",
+    );
+}
+
+test "strip: expressions.as_expression_in_jsx_child" {
+    try expect_strip(
+        .tsx,
+        "const element = <div>{value as string}</div>;",
+        "const element = <div>{value          }</div>;",
+    );
+}
+
+test "strip: expressions.type_arguments_in_jsx_opening_element" {
+    try expect_strip(
+        .tsx,
+        "const element = <Component<Type> />;",
+        "const element = <Component       />;",
+    );
+}
+
+test "strip: expressions.parameter_annotation_in_jsx_attribute" {
+    try expect_strip(
+        .tsx,
+        "const element = <Component render={(value: Type) => value} />;",
+        "const element = <Component render={(value      ) => value} />;",
+    );
+}
+
+test "strip: expressions.chained_suffix_assertions" {
+    try expect_strip(
+        .ts,
+        "const value = input as unknown satisfies Type;",
+        "const value = input                          ;",
+    );
+}
+
+test "strip: expressions.parenthesized_template_literal_array_assertion" {
+    try expect_strip(
+        .ts,
+        "let value = ['csv', 'json'] as (`csv` | `json`)[];",
+        "let value = ['csv', 'json']                      ;",
+    );
+}
+
+test "strip: expressions.safe_assertion_before_looser_binary_operator" {
+    try expect_strip(
+        .ts,
+        "const value = 1 * 1 as number + 2;",
+        "const value = 1 * 1           + 2;",
+    );
+}
+
+test "strip: expressions.safe_assertion_between_left_associative_operators" {
+    try expect_strip(
+        .ts,
+        "const value = 2 * 3 as number * 2;",
+        "const value = 2 * 3           * 2;",
+    );
+}
+
+test "strip: expressions.unary_assertion_left_of_exponentiation" {
+    // Keep the emitted JavaScript valid when erasing the assertion.
+    try expect_strip(
+        .ts,
+        "const value = -input as number ** 2;",
+        "const value =(-input         ) ** 2;",
+    );
+}
+
+test "strip: expressions.regular_expression_text_is_not_erased" {
+    try expect_strip(
+        .ts,
+        "const value = [/as\\s+Type/, input as Type];",
+        "const value = [/as\\s+Type/, input        ];",
+    );
+}
+
+test "strip: expressions.template_quasi_text_is_not_erased" {
+    try expect_strip(
+        .ts,
+        "const value = `as Type ${input as Type}`;",
+        "const value = `as Type ${input        }`;",
+    );
+}
+
+test "strip: expressions.type_arguments_in_decorator_expression" {
+    try expect_strip(
+        .ts,
+        "@decorate<Type>\nclass C {}",
+        "@decorate      \nclass C {}",
+    );
+}
+
+test "strip: generics.function_type_parameter_declaration" {
+    try expect_strip(
+        .ts,
+        "function id<T>(value: T) {}",
+        "function id   (value   ) {}",
+    );
+}
+
+test "strip: generics.function_expression_type_parameter_declaration" {
+    try expect_strip(
+        .ts,
+        "const f = function<T>(value: T) {};",
+        "const f = function   (value   ) {};",
+    );
+}
+
+test "strip: generics.class_type_parameter_declaration" {
+    try expect_strip(
+        .ts,
+        "class C<T> {}",
+        "class C    {}",
+    );
+}
+
+test "strip: generics.class_expression_type_parameter_declaration" {
+    try expect_strip(
+        .ts,
+        "const C = class<T> {};",
+        "const C = class    {};",
+    );
+}
+
+test "strip: generics.constrained_defaulted_type_parameter_declaration" {
+    try expect_strip(
+        .ts,
+        "function f<T extends Base = Default>() {}",
+        "function f                          () {}",
+    );
+}
+
+test "strip: generics.class_method_type_parameter_declaration" {
+    try expect_strip(
+        .ts,
+        "class C { method<T>() {} }",
+        "class C { method   () {} }",
+    );
+}
+
+test "strip: generics.object_method_type_parameter_declaration" {
+    try expect_strip(
+        .ts,
+        "const object = { method<T>() {} };",
+        "const object = { method   () {} };",
+    );
+}
+
+test "strip: generics.single_line_arrow_type_parameter_declaration" {
+    try expect_strip(
+        .ts,
+        "const f = <T>(value) => value;",
+        "const f =    (value) => value;",
+    );
+}
+
+test "strip: generics.call_type_argument_instantiation" {
+    try expect_strip(
+        .ts,
+        "id<string>(value);",
+        "id        (value);",
+    );
+}
+
+test "strip: generics.optional_call_type_argument_instantiation" {
+    try expect_strip(
+        .ts,
+        "object.method?.<Type>(value);",
+        "object.method?.      (value);",
+    );
+}
+
+test "strip: generics.instantiation_expression_type_arguments" {
+    try expect_strip(
+        .ts,
+        "const f = make<string>;",
+        "const f = make        ;",
+    );
+}
+
+test "strip: generics.new_expression_type_arguments" {
+    try expect_strip(
+        .ts,
+        "const value = new Box<Type>();",
+        "const value = new Box      ();",
+    );
+}
+
+test "strip: generics.new_expression_type_arguments_without_parentheses" {
+    try expect_strip(
+        .ts,
+        "const value = new Box<Type>;",
+        "const value = new Box      ;",
+    );
+}
+
+test "strip: generics.super_method_call_type_arguments" {
+    try expect_strip(
+        .ts,
+        "class C extends B { method() { super.method<Type>(); } }",
+        "class C extends B { method() { super.method      (); } }",
+    );
+}
+
+test "strip: generics.tagged_template_type_arguments" {
+    try expect_strip(
+        .ts,
+        "tag<Type>`value`;",
+        "tag      `value`;",
+    );
+}
+
+test "strip: generics.multiline_async_arrow_type_parameters" {
+    try expect_strip(
+        .ts,
+        "const f = async <\nType\n>(value: Type) => value;",
+        "const f = async (\n    \n  value      ) => value;",
+    );
+}
+
+test "strip: generics.multiline_returned_arrow_type_parameters" {
+    try expect_strip(
+        .ts,
+        "function f() { return<Type>\n(value: Type) => value; }",
+        "function f() { return(     \n value      ) => value; }",
+    );
+}
+
+test "strip: generics.multiline_thrown_arrow_type_parameters" {
+    try expect_strip(
+        .ts,
+        "function f() { throw<Type>\n(value: Type) => value; }",
+        "function f() { throw(     \n value      ) => value; }",
+    );
+}
+
+test "strip: generics.multiline_yielded_arrow_type_parameters" {
+    try expect_strip(
+        .ts,
+        "function* f() { yield<Type>\n(value: Type) => value; }",
+        "function* f() { yield(     \n value      ) => value; }",
+    );
+}
+
+test "strip: generics.multiline_plain_arrow_type_parameters_need_no_parenthesis_move" {
+    try expect_strip(
+        .ts,
+        "const f = <Type>\n(value: Type) => value;",
+        "const f =       \n(value      ) => value;",
+    );
+}
+
+test "strip: generics.nested_generic_arrow_type_argument" {
+    try expect_strip(
+        .ts,
+        "const value = foo<<T>(x: T) => number>(() => 1);",
+        "const value = foo                     (() => 1);",
+    );
+}
+
+test "strip: modules.whole_type_only_import" {
+    try expect_strip(
+        .ts,
+        "import type { T } from 'm';\nrun();",
+        "                           \nrun();",
+    );
+}
+
+test "strip: modules.default_type_only_import" {
+    try expect_strip(
+        .ts,
+        "import type T from 'm';\nrun();",
+        "                       \nrun();",
+    );
+}
+
+test "strip: modules.namespace_type_only_import" {
+    try expect_strip(
+        .ts,
+        "import type * as T from 'm';\nrun();",
+        "                            \nrun();",
+    );
+}
+
+test "strip: modules.named_type_only_import_item" {
+    try expect_strip(
+        .ts,
+        "import { type A, B } from 'm';",
+        "import {         B } from 'm';",
+    );
+}
+
+test "strip: modules.middle_type_only_import_item" {
+    try expect_strip(
+        .ts,
+        "import { A, type B, C } from 'm';",
+        "import { A,         C } from 'm';",
+    );
+}
+
+test "strip: modules.last_type_only_import_item" {
+    try expect_strip(
+        .ts,
+        "import { A, type B } from 'm';",
+        "import { A,        } from 'm';",
+    );
+}
+
+test "strip: modules.sole_inline_type_only_import_item" {
+    try expect_strip(
+        .ts,
+        "import { type A } from 'm';",
+        "import {        } from 'm';",
+    );
+}
+
+test "strip: modules.aliased_inline_type_only_import_item" {
+    try expect_strip(
+        .ts,
+        "import { type A as B, C } from 'm';",
+        "import {              C } from 'm';",
+    );
+}
+
+test "strip: modules.consecutive_inline_type_only_import_items" {
+    try expect_strip(
+        .ts,
+        "import { type A, type B, C } from 'm';",
+        "import {                 C } from 'm';",
+    );
+}
+
+test "strip: modules.last_inline_type_only_import_item_before_comment" {
+    try expect_strip(
+        .ts,
+        "import { value, type T /* comment */ } from 'm';",
+        "import { value,        /* comment */ } from 'm';",
+    );
+}
+
+test "strip: modules.whole_type_only_export" {
+    try expect_strip(
+        .ts,
+        "export type { T } from 'm';\nrun();",
+        "                           \nrun();",
+    );
+}
+
+test "strip: modules.named_type_only_export_item" {
+    try expect_strip(
+        .ts,
+        "export { type A, B };",
+        "export {         B };",
+    );
+}
+
+test "strip: modules.middle_type_only_export_item" {
+    try expect_strip(
+        .ts,
+        "export { A, type B, C };",
+        "export { A,         C };",
+    );
+}
+
+test "strip: modules.last_type_only_export_item" {
+    try expect_strip(
+        .ts,
+        "export { A, type B };",
+        "export { A,        };",
+    );
+}
+
+test "strip: modules.sole_inline_type_only_export_item" {
+    try expect_strip(
+        .ts,
+        "export { type A };",
+        "export {        };",
+    );
+}
+
+test "strip: modules.aliased_inline_type_only_export_item" {
+    try expect_strip(
+        .ts,
+        "export { type A as B, C };",
+        "export {              C };",
+    );
+}
+
+test "strip: modules.consecutive_inline_type_only_export_items" {
+    try expect_strip(
+        .ts,
+        "export { type A, type B, C };",
+        "export {                 C };",
+    );
+}
+
+test "strip: modules.type_only_export_all" {
+    try expect_strip(
+        .ts,
+        "export type * from 'm';\nrun();",
+        "                       \nrun();",
+    );
+}
+
+test "strip: modules.type_only_namespace_export_all" {
+    try expect_strip(
+        .ts,
+        "export type * as ns from 'm';\nrun();",
+        "                             \nrun();",
+    );
+}
+
+test "strip: modules.exported_type_alias_declaration" {
+    try expect_strip(
+        .ts,
+        "export type T = string;\nrun();",
+        "                       \nrun();",
+    );
+}
+
+test "strip: modules.qualified_type_only_import_equals" {
+    try expect_strip(
+        .ts,
+        "import type Alias = Namespace.Member;\nrun();",
+        "                                     \nrun();",
+    );
 }

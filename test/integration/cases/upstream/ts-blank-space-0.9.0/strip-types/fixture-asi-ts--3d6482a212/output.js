@@ -88,7 +88,7 @@ class ASI {
 
 class NoASI {
     f = 1/*missing ; */
-    static ;        ["computed-field"] = 1
+    static          ["computed-field"] = 1
 //         ^^^^^^^^
 }
 
