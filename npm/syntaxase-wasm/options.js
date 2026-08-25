@@ -5,6 +5,7 @@ const MODE_AUTOMATIC_DEVELOPMENT = 2;
 const MODE_CLASSIC = 3;
 const MODE_PRESERVE = 4;
 export const MODE_STRIP_TYPES = 5;
+export const MODE_STRIP_TYPES_TSX = 6;
 
 const IDENTIFIER_NAME = /^[$_\p{ID_Start}][$\u200c\u200d_\p{ID_Continue}]*$/u;
 const RESERVED_IDENTIFIER_REFERENCES = new Set([
@@ -67,6 +68,25 @@ export function assertSourceText(sourceText) {
 export function resolveTransformOptions(options) {
 	assertOptions(options);
 	return resolveJSXConfig(options.jsx);
+}
+
+export function resolveStripTypesOptions(options) {
+	if (options === null || typeof options !== "object" || Array.isArray(options)) {
+		throw new TypeError("stripTypes options must be an object");
+	}
+	for (const key of Reflect.ownKeys(options)) {
+		if (key !== "lang") {
+			throw new TypeError(`stripTypes options contains unknown option ${String(key)}`);
+		}
+	}
+
+	if (!Object.hasOwn(options, "lang") || options.lang === "ts") {
+		return MODE_STRIP_TYPES;
+	}
+	if (options.lang === "tsx") {
+		return MODE_STRIP_TYPES_TSX;
+	}
+	throw new TypeError('stripTypes options.lang must be "ts" or "tsx"');
 }
 
 function assertOptions(options) {

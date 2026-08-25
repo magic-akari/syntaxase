@@ -1,5 +1,5 @@
 import wasmBytes from "./wasm.js";
-import { assertSourceText, MODE_STRIP_TYPES, resolveTransformOptions } from "./options.js";
+import { assertSourceText, resolveStripTypesOptions, resolveTransformOptions } from "./options.js";
 
 const wasmModule = new WebAssembly.Module(wasmBytes);
 const wasmInstance = new WebAssembly.Instance(wasmModule);
@@ -17,9 +17,9 @@ export function transform(sourceText, options = {}) {
 }
 
 /** Erase only fixed-width TypeScript syntax while preserving source length and line layout. */
-export function stripTypes(sourceText) {
+export function stripTypes(sourceText, options = {}) {
 	assertSourceText(sourceText);
-	return invoke(sourceText, MODE_STRIP_TYPES, "", "");
+	return invoke(sourceText, resolveStripTypesOptions(options), "", "");
 }
 
 function invoke(sourceText, mode, firstOption, secondOption) {

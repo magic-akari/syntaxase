@@ -1,8 +1,7 @@
 //! Syntaxase's public Zig API.
 //!
-//! `transform` accepts source text plus options, while `stripTypes` accepts
-//! source text alone. Their `_into` variants append to caller-owned output
-//! buffers.
+//! `transform` and `stripTypes` accept source text plus options. Their `_into`
+//! variants append to caller-owned output buffers.
 
 const transform_module = @import("transform/root.zig");
 
@@ -14,6 +13,8 @@ pub const DiagnosticSeverity = transform_module.DiagnosticSeverity;
 pub const DiagnosticSpan = transform_module.DiagnosticSpan;
 pub const Error = transform_module.Error;
 pub const JSXConfig = transform_module.JSXConfig;
+pub const StripTypesLanguage = transform_module.StripTypesLanguage;
+pub const StripTypesOptions = transform_module.StripTypesOptions;
 pub const TransformResult = transform_module.TransformResult;
 pub const TransformOptions = transform_module.TransformOptions;
 pub const TransformInfo = transform_module.TransformInfo;

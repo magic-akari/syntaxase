@@ -31,6 +31,23 @@ pub const TransformOptions = struct {
     jsx: JSXConfig = .disabled,
 };
 
+/// Source language accepted by fixed-width type stripping.
+pub const StripTypesLanguage = enum {
+    ts,
+    tsx,
+
+    fn parser_lang(language: StripTypesLanguage) parser.ast.Lang {
+        return switch (language) {
+            .ts => .ts,
+            .tsx => .tsx,
+        };
+    }
+};
+
+pub const StripTypesOptions = struct {
+    lang: StripTypesLanguage = .ts,
+};
+
 pub const Error = Allocator.Error;
 
 /// Owned output of a Syntaxase transform.
@@ -64,12 +81,12 @@ pub const TransformInfo = struct {
 const SourceFile = source_file.SourceFile;
 
 const TransformMode = union(enum) {
-    strip_types,
+    strip_types: StripTypesLanguage,
     transform: JSXConfig,
 
     fn lang(mode: TransformMode) parser.ast.Lang {
         return switch (mode) {
-            .strip_types => .ts,
+            .strip_types => |language| language.parser_lang(),
             .transform => |jsx| if (jsx.parses_jsx()) .tsx else .ts,
         };
     }
@@ -117,10 +134,14 @@ pub fn transform_into(
 ///
 /// Runtime TypeScript constructs that require code generation are handled by
 /// later lowering phases rather than this fixed-width pass.
-pub fn stripTypes(allocator: Allocator, source_text: []const u8) Error!TransformResult {
+pub fn stripTypes(
+    allocator: Allocator,
+    source_text: []const u8,
+    options: StripTypesOptions,
+) Error!TransformResult {
     var output: std.ArrayList(u8) = .empty;
     errdefer output.deinit(allocator);
-    var info = try strip_types_into(allocator, &output, source_text);
+    var info = try strip_types_into(allocator, &output, source_text, options);
     errdefer info.deinit(allocator);
 
     const code = try output.toOwnedSlice(allocator);
@@ -134,8 +155,9 @@ pub fn strip_types_into(
     allocator: Allocator,
     output: *std.ArrayList(u8),
     source_text: []const u8,
+    options: StripTypesOptions,
 ) Error!TransformInfo {
-    return run_into(allocator, output, source_text, .strip_types);
+    return run_into(allocator, output, source_text, .{ .strip_types = options.lang });
 }
 
 fn run_into(
@@ -507,7 +529,7 @@ test "multiline JSX fragments preserve child columns and closing lines" {
 test "stripTypes preserves JavaScript UTF-16 width" {
     const allocator = std.testing.allocator;
     const source = "const value: 类型𝒳 = input;\n";
-    var result = try stripTypes(allocator, source);
+    var result = try stripTypes(allocator, source, .{});
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings("const value       = input;\n", result.code);
@@ -531,7 +553,7 @@ test "transform lowers a native Yuku enum while stripTypes does not" {
         transformed.code,
     );
 
-    var stripped = try stripTypes(allocator, source);
+    var stripped = try stripTypes(allocator, source, .{});
     defer stripped.deinit(allocator);
     try std.testing.expectEqualStrings(source, stripped.code);
 }

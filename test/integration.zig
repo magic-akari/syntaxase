@@ -300,7 +300,9 @@ fn evaluate(
     metadata: Metadata,
 ) !syntaxase.TransformResult {
     if (metadata.operation == .stripTypes) {
-        return syntaxase.stripTypes(allocator, source);
+        return syntaxase.stripTypes(allocator, source, .{
+            .lang = if (std.mem.eql(u8, input_name, "input.tsx")) .tsx else .ts,
+        });
     }
 
     const jsx = metadata.options.jsx orelse {

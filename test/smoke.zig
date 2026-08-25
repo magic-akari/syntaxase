@@ -19,6 +19,7 @@ test "stripTypes is callable through the public module" {
     var result = try syntaxase.stripTypes(
         allocator,
         "export type Answer = number;\nexport const answer = 42;\n",
+        .{},
     );
     defer result.deinit(allocator);
 
@@ -51,10 +52,24 @@ test "native into APIs append to caller-owned output" {
         allocator,
         &output,
         "type T = number;\n",
+        .{},
     );
     defer stripped.deinit(allocator);
     try std.testing.expectEqualStrings(
         "prefix:const value         = 1;\n                \n",
         output.items,
     );
+}
+
+test "stripTypes accepts TSX through the public module" {
+    const allocator = std.testing.allocator;
+    const source = "const element = <Component<Type> value={input as Type} />;\n";
+    var result = try syntaxase.stripTypes(allocator, source, .{ .lang = .tsx });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings(
+        "const element = <Component       value={input        } />;\n",
+        result.code,
+    );
+    try std.testing.expectEqual(@as(usize, 0), result.diagnostics.len);
 }

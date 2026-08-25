@@ -9,6 +9,7 @@ pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
 
     var strip_types = false;
+    var strip_types_lang: syntaxase.StripTypesLanguage = .ts;
     var jsx_runtime: enum { disabled, automatic, classic, preserve } = .disabled;
     var jsx_development = false;
     var jsx_import_source: []const u8 = "react";
@@ -17,6 +18,10 @@ pub fn main(init: std.process.Init) !void {
     for (args[1..]) |argument| {
         if (std.mem.eql(u8, argument, "--strip-types")) {
             strip_types = true;
+        } else if (std.mem.eql(u8, argument, "--lang=ts")) {
+            strip_types_lang = .ts;
+        } else if (std.mem.eql(u8, argument, "--lang=tsx")) {
+            strip_types_lang = .tsx;
         } else if (std.mem.eql(u8, argument, "--jsx=automatic")) {
             jsx_runtime = .automatic;
         } else if (std.mem.eql(u8, argument, "--jsx=classic")) {
@@ -42,7 +47,7 @@ pub fn main(init: std.process.Init) !void {
     defer allocator.free(source);
 
     var result = if (strip_types)
-        try syntaxase.stripTypes(allocator, source)
+        try syntaxase.stripTypes(allocator, source, .{ .lang = strip_types_lang })
     else switch (jsx_runtime) {
         .disabled => try syntaxase.transform(allocator, source, .{}),
         .automatic => try syntaxase.transform(allocator, source, .{

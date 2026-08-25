@@ -26,6 +26,8 @@ interface User { name: string }
 const user: User = { name: "Ada" };
 `);
 
+const strippedTsx = stripTypes(`const view = <Card<User> user={user as User} />;`, { lang: "tsx" });
+
 const transformed = transform(`const view: JSX.Element = <h1>Hello</h1>;`, {
 	jsx: true,
 });
@@ -35,7 +37,7 @@ Use the same named exports from `syntaxase-wasm` when targeting WebAssembly.
 
 ## API notes
 
-- `stripTypes` performs fixed-width erasure while preserving source length and line layout. Use it with source accepted by TypeScript's [`erasableSyntaxOnly`](https://www.typescriptlang.org/tsconfig/erasableSyntaxOnly.html) option.
+- `stripTypes` performs fixed-width erasure while preserving source length and line layout. Pass `{ lang: "tsx" }` to parse TSX while preserving JSX unchanged. Use it with source accepted by TypeScript's [`erasableSyntaxOnly`](https://www.typescriptlang.org/tsconfig/erasableSyntaxOnly.html) option.
 - `transform` additionally lowers supported runtime TypeScript constructs and optional JSX. `{ jsx: true }` uses React's automatic production runtime.
 - The JavaScript packages return strings, not parser diagnostics. Use a TypeScript checker or another parser when validation is required.
 

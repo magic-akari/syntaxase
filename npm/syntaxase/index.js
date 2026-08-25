@@ -1,5 +1,5 @@
 import binding from "./binding.js";
-import { assertSourceText, MODE_STRIP_TYPES, resolveTransformOptions } from "./options.js";
+import { assertSourceText, resolveStripTypesOptions, resolveTransformOptions } from "./options.js";
 
 const encoder = new TextEncoder();
 const empty = new Uint8Array();
@@ -12,9 +12,9 @@ export function transform(sourceText, options = {}) {
 }
 
 /** Erase only fixed-width TypeScript syntax while preserving source length and line layout. */
-export function stripTypes(sourceText) {
+export function stripTypes(sourceText, options = {}) {
 	assertSourceText(sourceText);
-	return invoke(sourceText, MODE_STRIP_TYPES, "", "");
+	return invoke(sourceText, resolveStripTypesOptions(options), "", "");
 }
 
 function invoke(sourceText, mode, firstOption, secondOption) {

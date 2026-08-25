@@ -7,6 +7,10 @@ export function runApiTests({ stripTypes, transform }, label) {
 		stripTypes("export type Answer = number;\nexport const answer = 42;\n"),
 		"                            \nexport const answer = 42;\n",
 	);
+	assert.equal(
+		stripTypes("const element = <Component<Type> value={input as Type} />;\n", { lang: "tsx" }),
+		"const element = <Component       value={input        } />;\n",
+	);
 	assert.equal(transform('const 名称: string = "🙂";\n'), 'const 名称         = "🙂";\n');
 	assert.equal(typeof transform("const value: = 1;\n"), "string");
 
@@ -59,6 +63,14 @@ export function runApiTests({ stripTypes, transform }, label) {
 	assert.throws(() => transform("", { jsx: { runtime: "preserve", development: true } }), {
 		name: "TypeError",
 		message: "transform options.jsx.development is not supported with preserve runtime",
+	});
+	assert.throws(() => stripTypes("", { lang: "jsx" }), {
+		name: "TypeError",
+		message: 'stripTypes options.lang must be "ts" or "tsx"',
+	});
+	assert.throws(() => stripTypes("", { unknown: true }), {
+		name: "TypeError",
+		message: "stripTypes options contains unknown option unknown",
 	});
 
 	console.log(`${label} API tests passed`);

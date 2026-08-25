@@ -21,6 +21,8 @@ interface User { name: string }
 const user: User = { name: "Ada" };
 `);
 
+const strippedTsx = stripTypes(`const view = <Card<User> user={user as User} />;`, { lang: "tsx" });
+
 const transformed = transform(`const view: JSX.Element = <h1>Hello</h1>;`, { jsx: true });
 ```
 
@@ -32,6 +34,9 @@ length and line layout. Use it with source accepted by TypeScript's
 option. It does not validate that constraint: runtime TypeScript constructs such
 as enums may remain unchanged or lose TypeScript-only modifiers without gaining
 the JavaScript code needed to preserve their semantics.
+
+By default, `stripTypes` parses TypeScript without JSX. Pass `{ lang: "tsx" }`
+to strip TypeScript syntax from TSX while leaving JSX unchanged.
 
 `transform` additionally lowers supported runtime TypeScript constructs and,
 when enabled, JSX.

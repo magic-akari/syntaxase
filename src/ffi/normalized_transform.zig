@@ -8,6 +8,7 @@ pub const Mode = enum(u32) {
     classic,
     preserve,
     strip_types,
+    strip_types_tsx,
 };
 
 pub fn parse_mode(raw_mode: u32) ?Mode {
@@ -18,6 +19,7 @@ pub fn parse_mode(raw_mode: u32) ?Mode {
         3 => .classic,
         4 => .preserve,
         5 => .strip_types,
+        6 => .strip_types_tsx,
         else => null,
     };
 }
@@ -50,7 +52,13 @@ pub fn run_into(
         .preserve => syntaxase.transform_into(allocator, output, source, .{
             .jsx = .preserve,
         }),
-        .strip_types => syntaxase.strip_types_into(allocator, output, source),
+        .strip_types => syntaxase.strip_types_into(allocator, output, source, .{}),
+        .strip_types_tsx => syntaxase.strip_types_into(
+            allocator,
+            output,
+            source,
+            .{ .lang = .tsx },
+        ),
     };
 }
 
