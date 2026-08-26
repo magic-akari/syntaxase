@@ -5,7 +5,7 @@
 	"dependencies": {
 		"@babel/standalone": "8.0.4",
 		"@oxc-transform/binding-wasm32-wasi": "0.147.0",
-		"oxc-transform": "0.146.0",
+		"oxc-transform": "0.147.0",
 		"sucrase": "3.35.1",
 		"ts-blank-space": "0.9.0"
 	},
