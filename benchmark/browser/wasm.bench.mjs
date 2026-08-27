@@ -37,25 +37,8 @@ test("warmed browser transform comparison", async () => {
 });
 
 function createScenarios() {
-	const typeErasure = requireCorpus("hono-types");
+	const typeErasureCorpora = ["astro-config", "effect-schema-ast", "hono-types"].map(requireCorpus);
 	const tsx = requireCorpus("react-router-tsx");
-
-	const typeErasureOxcOptions = {
-		lang: "ts",
-		sourceType: "module",
-		target: "esnext",
-	};
-	const typeErasureBabelOptions = {
-		filename: typeErasure.upstreamPath,
-		sourceType: "module",
-		ast: false,
-		sourceMaps: false,
-		presets: ["typescript"],
-	};
-	const typeErasureSucraseOptions = {
-		transforms: ["typescript"],
-		disableESTransforms: true,
-	};
 
 	const tsxOxcOptions = {
 		lang: "tsx",
@@ -90,32 +73,7 @@ function createScenarios() {
 	};
 
 	return [
-		{
-			label: "Type erasure",
-			corpus: typeErasure,
-			implementations: [
-				{
-					name: "Syntaxase WASM",
-					run: () => stripTypes(typeErasure.source),
-				},
-				{
-					name: "Oxc WASI",
-					run: () => runOxc(typeErasure.upstreamPath, typeErasure.source, typeErasureOxcOptions),
-				},
-				{
-					name: "Babel standalone",
-					run: () => runBabel(typeErasure.source, typeErasureBabelOptions),
-				},
-				{
-					name: "Sucrase",
-					run: () => sucraseTransform(typeErasure.source, typeErasureSucraseOptions).code,
-				},
-				{
-					name: "ts-blank-space",
-					run: () => tsBlankSpace(typeErasure.source, unsupportedTypeScript),
-				},
-			],
-		},
+		...typeErasureCorpora.map(createTypeErasureScenario),
 		{
 			label: "TypeScript + JSX automatic runtime",
 			corpus: tsx,
@@ -140,6 +98,52 @@ function createScenarios() {
 			note: "ts-blank-space is omitted because it preserves JSX rather than lowering the automatic runtime.",
 		},
 	];
+}
+
+function createTypeErasureScenario(corpus) {
+	const oxcOptions = {
+		lang: "ts",
+		sourceType: "module",
+		target: "esnext",
+	};
+	const babelOptions = {
+		filename: corpus.upstreamPath,
+		sourceType: "module",
+		ast: false,
+		sourceMaps: false,
+		presets: ["typescript"],
+	};
+	const sucraseOptions = {
+		transforms: ["typescript"],
+		disableESTransforms: true,
+	};
+
+	return {
+		label: "Type erasure",
+		corpus,
+		implementations: [
+			{
+				name: "Syntaxase WASM",
+				run: () => stripTypes(corpus.source),
+			},
+			{
+				name: "Oxc WASI",
+				run: () => runOxc(corpus.upstreamPath, corpus.source, oxcOptions),
+			},
+			{
+				name: "Babel standalone",
+				run: () => runBabel(corpus.source, babelOptions),
+			},
+			{
+				name: "Sucrase",
+				run: () => sucraseTransform(corpus.source, sucraseOptions).code,
+			},
+			{
+				name: "ts-blank-space",
+				run: () => tsBlankSpace(corpus.source, unsupportedTypeScript),
+			},
+		],
+	};
 }
 
 function requireCorpus(id) {
@@ -233,7 +237,7 @@ function formatReport(scenarios) {
 
 	for (const scenario of scenarios) {
 		const syntaxase = scenario.results.find((result) => result.name === "Syntaxase WASM");
-		lines.push("", `${scenario.label} (${scenario.corpus.bytes} bytes)`);
+		lines.push("", `${scenario.label}: ${scenario.corpus.label} (${scenario.corpus.bytes} bytes)`);
 		lines.push("Implementation             ms/op       MiB/s       speed");
 		for (const result of scenario.results) {
 			const milliseconds = result.medianNanoseconds / 1e6;

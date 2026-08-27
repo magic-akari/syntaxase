@@ -11,17 +11,18 @@ const executableName = process.platform === "win32" ? "syntaxase-native-benchmar
 const defaultExecutable = fileURLToPath(new URL(`../zig-out/bin/${executableName}`, import.meta.url));
 const executable = process.argv[2] ?? defaultExecutable;
 
+const typeErasureCorpusIds = ["astro-config", "effect-schema-ast", "hono-types"];
 const scenarios = [
-	{
+	...typeErasureCorpusIds.map((corpusId) => ({
 		label: "Type erasure",
-		corpusId: "hono-types",
+		corpusId,
 		nativeMode: "strip",
 		oxcOptions: {
 			lang: "ts",
 			sourceType: "module",
 			target: "esnext",
 		},
-	},
+	})),
 	{
 		label: "TypeScript + JSX",
 		corpusId: "react-router-tsx",
@@ -51,7 +52,7 @@ for (const scenario of scenarios) {
 
 	const native = measureNative(scenario.nativeMode, source);
 	const oxc = measureOxc(corpus.upstreamPath, source, oxcOptions);
-	writeLane(scenario.label, sourceBuffer.length, native, oxc);
+	writeLane(`${scenario.label}: ${corpus.label}`, sourceBuffer.length, native, oxc);
 }
 
 function findCorpus(id) {
