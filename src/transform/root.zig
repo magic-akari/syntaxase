@@ -695,7 +695,7 @@ test "namespace receiver capture ignores erased type-only names" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings(
-        "var       N;(function(N){                       function f() {}N.f=f; })(N||(N={}));\n",
+        "var       N;(function(N){ ;                     function f() {}N.f=f; })(N||(N={}));\n",
         result.code,
     );
 }

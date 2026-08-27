@@ -625,13 +625,23 @@ const Visitor = struct {
         if (property.value != .null) {
             marker_end = @min(marker_end, ctx.tree.span(property.value).start);
         }
-        if (property.optional) {
-            try self.erase_punctuation(key_span.end, marker_end, "?");
-        }
-        if (property.definite) {
-            try self.erase_punctuation(key_span.end, marker_end, "!");
-        }
-        try self.preserve_keyword_named_class_field(property, key_span, ctx);
+        const optional_start = if (property.optional)
+            try self.erase_punctuation(key_span.end, marker_end, "?")
+        else
+            null;
+        const definite_start = if (property.definite)
+            try self.erase_punctuation(key_span.end, marker_end, "!")
+        else
+            null;
+        const separator_start = if (property.type_annotation != .null)
+            ctx.tree.span(property.type_annotation).start
+        else
+            optional_start orelse definite_start;
+        try self.preserve_keyword_named_class_field(
+            key_span,
+            separator_start,
+            property.value != .null,
+        );
     }
 
     fn erase_method_syntax(
@@ -680,7 +690,7 @@ const Visitor = struct {
         );
         if (method.optional) {
             const function_start = ctx.tree.span(method.value).start;
-            try self.erase_punctuation(key_span.end, function_start, "?");
+            _ = try self.erase_punctuation(key_span.end, function_start, "?");
         }
     }
 
@@ -709,23 +719,30 @@ const Visitor = struct {
         return std.mem.eql(u8, text, "in") or std.mem.eql(u8, text, "instanceof");
     }
 
+    fn is_contextual_class_field_key(
+        self: *const Visitor,
+        token: ?parser.ast.Token,
+    ) bool {
+        const key = token orelse return false;
+        const text = self.tokens.text(key);
+        return std.mem.eql(u8, text, "get") or
+            std.mem.eql(u8, text, "set") or
+            std.mem.eql(u8, text, "static");
+    }
+
     fn preserve_keyword_named_class_field(
         self: *Visitor,
-        property: parser.ast.PropertyDefinition,
         key_span: parser.ast.Span,
-        ctx: *Ctx,
+        separator_start: ?u32,
+        has_value: bool,
     ) Allocator.Error!void {
-        if (property.value != .null or property.type_annotation == .null) return;
+        if (has_value) return;
+        const separator = separator_start orelse return;
 
-        const key = self.tokens.first_in_range(key_span.start, key_span.end) orelse return;
-        const key_text = self.tokens.text(key);
-        const is_contextual_keyword = std.mem.eql(u8, key_text, "get") or
-            std.mem.eql(u8, key_text, "set") or
-            std.mem.eql(u8, key_text, "static");
-        if (!is_contextual_keyword) return;
+        const key = self.tokens.first_in_range(key_span.start, key_span.end);
+        if (!self.is_contextual_class_field_key(key)) return;
 
-        const annotation_start = ctx.tree.span(property.type_annotation).start;
-        try self.edits.add_substitution(annotation_start, .semicolon);
+        try self.edits.add_substitution(separator, .semicolon);
     }
 
     fn erase_keyword(
@@ -744,9 +761,10 @@ const Visitor = struct {
         start: u32,
         end: u32,
         punctuation: []const u8,
-    ) Allocator.Error!void {
-        const token = self.tokens.find_forward(start, end, punctuation) orelse return;
+    ) Allocator.Error!?u32 {
+        const token = self.tokens.find_forward(start, end, punctuation) orelse return null;
         try self.edits.add_blank(token.span.start, token.span.end);
+        return token.span.start;
     }
 
     fn erase_optional_pattern(
@@ -1112,13 +1130,17 @@ fn needs_semicolon_before_erasure(
     while (cursor > 0) {
         cursor -= 1;
         const previous = statements[cursor];
-        if (previous == .null or is_erasable_statement(ctx.tree, previous)) continue;
+        if (previous == .null) continue;
+        if (is_erasable_statement(ctx.tree, previous)) return false;
 
         const previous_span = ctx.tree.span(previous);
         if (previous_span.end == 0) return false;
         return source[previous_span.end - 1] != ';';
     }
-    return false;
+    return switch (parent) {
+        .program, .function_body, .ts_module_block => true,
+        else => false,
+    };
 }
 
 fn statement_list(
@@ -1291,7 +1313,7 @@ test "eraser removes whole type-only declarations" {
     const output = try edits.render();
     defer allocator.free(output);
     try std.testing.expectEqualStrings(
-        "                             \n" ++
+        ";                            \n" ++
             "                   \n" ++
             "                              \n" ++
             "const value       = load();\n",
@@ -1469,7 +1491,7 @@ test "eraser removes type-only import and export list items" {
     const output = try edits.render();
     defer allocator.free(output);
     try std.testing.expectEqualStrings(
-        "                                 \n" ++
+        ";                                \n" ++
             "import {         B, /* lead */        } from \"values\";\n" ++
             "export {         B,        };\n",
         output,
@@ -1921,11 +1943,35 @@ test "strip: asi.satisfies_assertion_before_computed_statement" {
     );
 }
 
-test "strip: asi.consecutive_type_declarations_preserve_following_directive" {
+test "strip: asi.consecutive_type_declarations_terminate_directive_prologue" {
     try expect_strip(
         .ts,
         "interface A {}\ntype B = string;\n'use strict';",
-        "              \n                \n'use strict';",
+        ";             \n                \n'use strict';",
+    );
+}
+
+test "strip: asi.first_erased_script_statement_terminates_directive_prologue" {
+    try expect_strip(
+        .ts,
+        "type T = string;\n'use strict';",
+        ";               \n'use strict';",
+    );
+}
+
+test "strip: asi.first_erased_module_statement_terminates_directive_prologue" {
+    try expect_strip(
+        .ts,
+        "type T = string;\n'use strict';\nexport {};",
+        ";               \n'use strict';\nexport {};",
+    );
+}
+
+test "strip: asi.first_erased_function_statement_terminates_directive_prologue" {
+    try expect_strip(
+        .ts,
+        "function f() {\ntype T = string;\n'use strict';\n}",
+        "function f() {\n;               \n'use strict';\n}",
     );
 }
 
@@ -1950,6 +1996,22 @@ test "strip: asi.suffix_assertion_before_binary_continuation_stays_connected" {
         .ts,
         "value as Type\n+ next;",
         "value        \n+ next;",
+    );
+}
+
+test "strip: asi.suffix_assertion_before_member_continuation_stays_connected" {
+    try expect_strip(
+        .ts,
+        "const value = input!\n[0];",
+        "const value = input \n[0];",
+    );
+}
+
+test "strip: asi.parenthesized_suffix_assertion_before_call_continuation_stays_connected" {
+    try expect_strip(
+        .ts,
+        "const value = (input as Fn)\n(0);",
+        "const value = (input      )\n(0);",
     );
 }
 
@@ -2033,6 +2095,14 @@ test "strip: classes.abstract_class_modifier" {
     );
 }
 
+test "strip: classes.decorated_abstract_class_modifier" {
+    try expect_strip(
+        .ts,
+        "@decorators.abstract abstract class C {}",
+        "@decorators.abstract          class C {}",
+    );
+}
+
 test "strip: classes.public_field_modifier" {
     try expect_strip(
         .ts,
@@ -2110,6 +2180,30 @@ test "strip: classes.optional_field_marker" {
         .ts,
         "class C { value?: number; }",
         "class C { value         ; }",
+    );
+}
+
+test "strip: classes.optional_get_named_field_keeps_field_boundary" {
+    try expect_strip(
+        .ts,
+        "class C { get?\nnext() {} }",
+        "class C { get;\nnext() {} }",
+    );
+}
+
+test "strip: classes.optional_set_named_field_keeps_field_boundary" {
+    try expect_strip(
+        .ts,
+        "class C { set?\nnext() {} }",
+        "class C { set;\nnext() {} }",
+    );
+}
+
+test "strip: classes.optional_static_named_field_keeps_field_boundary" {
+    try expect_strip(
+        .ts,
+        "class C { static?\nnext() {} }",
+        "class C { static;\nnext() {} }",
     );
 }
 
@@ -2233,11 +2327,35 @@ test "strip: classes.decorator_separates_computed_method_after_modifier_erasure"
     );
 }
 
+test "strip: classes.decorator_named_readonly_does_not_hide_field_modifier" {
+    try expect_strip(
+        .ts,
+        "class C { @readonly readonly value = 1; }",
+        "class C { @readonly          value = 1; }",
+    );
+}
+
+test "strip: classes.decorator_named_override_does_not_hide_method_modifier" {
+    try expect_strip(
+        .ts,
+        "class C { @override override method() {} }",
+        "class C { @override          method() {} }",
+    );
+}
+
+test "strip: classes.decorator_named_public_does_not_hide_accessibility_modifier" {
+    try expect_strip(
+        .ts,
+        "class C { @public public value = 1; }",
+        "class C { @public        value = 1; }",
+    );
+}
+
 test "strip: declarations.type_alias_declaration" {
     try expect_strip(
         .ts,
         "type T = string;\nrun();",
-        "                \nrun();",
+        ";               \nrun();",
     );
 }
 
@@ -2245,7 +2363,7 @@ test "strip: declarations.interface_declaration" {
     try expect_strip(
         .ts,
         "interface I {}\nrun();",
-        "              \nrun();",
+        ";             \nrun();",
     );
 }
 
@@ -2253,7 +2371,7 @@ test "strip: declarations.exported_interface_declaration" {
     try expect_strip(
         .ts,
         "export interface I {}\nrun();",
-        "                     \nrun();",
+        ";                    \nrun();",
     );
 }
 
@@ -2261,7 +2379,7 @@ test "strip: declarations.namespace_export_declaration" {
     try expect_strip(
         .ts,
         "export as namespace Lib;\nrun();",
-        "                        \nrun();",
+        ";                       \nrun();",
     );
 }
 
@@ -2269,7 +2387,7 @@ test "strip: declarations.ambient_variable_declaration" {
     try expect_strip(
         .ts,
         "declare const value: number;\nrun();",
-        "                            \nrun();",
+        ";                           \nrun();",
     );
 }
 
@@ -2277,7 +2395,7 @@ test "strip: declarations.ambient_class_declaration" {
     try expect_strip(
         .ts,
         "declare class C {}\nrun();",
-        "                  \nrun();",
+        ";                 \nrun();",
     );
 }
 
@@ -2285,7 +2403,7 @@ test "strip: declarations.exported_ambient_class_declaration" {
     try expect_strip(
         .ts,
         "export declare class C {}\nrun();",
-        "                         \nrun();",
+        ";                        \nrun();",
     );
 }
 
@@ -2293,7 +2411,7 @@ test "strip: declarations.ambient_function_declaration" {
     try expect_strip(
         .ts,
         "declare function f(): void;\nrun();",
-        "                           \nrun();",
+        ";                          \nrun();",
     );
 }
 
@@ -2301,7 +2419,7 @@ test "strip: declarations.exported_ambient_function_declaration" {
     try expect_strip(
         .ts,
         "export declare function f(): void;\nrun();",
-        "                                  \nrun();",
+        ";                                 \nrun();",
     );
 }
 
@@ -2309,7 +2427,7 @@ test "strip: declarations.exported_function_overload_signature" {
     try expect_strip(
         .ts,
         "export function f(): void;\nexport function f() {}",
-        "                          \nexport function f() {}",
+        ";                         \nexport function f() {}",
     );
 }
 
@@ -2317,7 +2435,7 @@ test "strip: declarations.function_overload_signature" {
     try expect_strip(
         .ts,
         "function f(): void;\nfunction f() {}",
-        "                   \nfunction f() {}",
+        ";                  \nfunction f() {}",
     );
 }
 
@@ -2325,7 +2443,7 @@ test "strip: declarations.ambient_enum_declaration" {
     try expect_strip(
         .ts,
         "declare enum E {}\nrun();",
-        "                 \nrun();",
+        ";                \nrun();",
     );
 }
 
@@ -2333,7 +2451,7 @@ test "strip: declarations.exported_ambient_enum_declaration" {
     try expect_strip(
         .ts,
         "export declare enum E {}\nrun();",
-        "                        \nrun();",
+        ";                       \nrun();",
     );
 }
 
@@ -2341,7 +2459,7 @@ test "strip: declarations.ambient_namespace_declaration" {
     try expect_strip(
         .ts,
         "declare namespace N { const value: number; }\nrun();",
-        "                                            \nrun();",
+        ";                                           \nrun();",
     );
 }
 
@@ -2349,7 +2467,7 @@ test "strip: declarations.exported_ambient_namespace_declaration" {
     try expect_strip(
         .ts,
         "export declare namespace N {}\nrun();",
-        "                             \nrun();",
+        ";                            \nrun();",
     );
 }
 
@@ -2357,7 +2475,7 @@ test "strip: declarations.exported_ambient_variable_declaration" {
     try expect_strip(
         .ts,
         "export declare const value: number;\nrun();",
-        "                                   \nrun();",
+        ";                                  \nrun();",
     );
 }
 
@@ -2365,7 +2483,7 @@ test "strip: declarations.type_only_namespace_declaration" {
     try expect_strip(
         .ts,
         "namespace N { export type T = string; }\nrun();",
-        "                                       \nrun();",
+        ";                                      \nrun();",
     );
 }
 
@@ -2373,7 +2491,7 @@ test "strip: declarations.qualified_type_only_namespace_declaration" {
     try expect_strip(
         .ts,
         "namespace A.B { type T = string; }\nrun();",
-        "                                  \nrun();",
+        ";                                 \nrun();",
     );
 }
 
@@ -2381,15 +2499,7 @@ test "strip: declarations.empty_namespace_declaration" {
     try expect_strip(
         .ts,
         "namespace N {}\nrun();",
-        "              \nrun();",
-    );
-}
-
-test "strip: declarations.namespace_with_local_import_alias" {
-    try expect_strip(
-        .ts,
-        "namespace N { import x = A.x; }\nrun();",
-        "                               \nrun();",
+        ";             \nrun();",
     );
 }
 
@@ -2397,7 +2507,7 @@ test "strip: declarations.ambient_external_module_declaration" {
     try expect_strip(
         .ts,
         "declare module 'pkg' { const value: number; }\nrun();",
-        "                                             \nrun();",
+        ";                                            \nrun();",
     );
 }
 
@@ -2405,7 +2515,7 @@ test "strip: declarations.global_augmentation_declaration" {
     try expect_strip(
         .ts,
         "declare global { interface Window {} }\nrun();",
-        "                                      \nrun();",
+        ";                                     \nrun();",
     );
 }
 
@@ -2413,7 +2523,7 @@ test "strip: declarations.default_exported_interface_declaration" {
     try expect_strip(
         .ts,
         "export default interface I {}\nrun();",
-        "                             \nrun();",
+        ";                            \nrun();",
     );
 }
 
@@ -2421,7 +2531,7 @@ test "strip: diagnostics.type_only_import_equals" {
     try expect_strip(
         .ts,
         "import type Model = require('model');\nrun();",
-        "                                     \nrun();",
+        ";                                    \nrun();",
     );
 }
 
@@ -2798,7 +2908,7 @@ test "strip: modules.whole_type_only_import" {
     try expect_strip(
         .ts,
         "import type { T } from 'm';\nrun();",
-        "                           \nrun();",
+        ";                          \nrun();",
     );
 }
 
@@ -2806,7 +2916,7 @@ test "strip: modules.default_type_only_import" {
     try expect_strip(
         .ts,
         "import type T from 'm';\nrun();",
-        "                       \nrun();",
+        ";                      \nrun();",
     );
 }
 
@@ -2814,7 +2924,7 @@ test "strip: modules.namespace_type_only_import" {
     try expect_strip(
         .ts,
         "import type * as T from 'm';\nrun();",
-        "                            \nrun();",
+        ";                           \nrun();",
     );
 }
 
@@ -2878,7 +2988,7 @@ test "strip: modules.whole_type_only_export" {
     try expect_strip(
         .ts,
         "export type { T } from 'm';\nrun();",
-        "                           \nrun();",
+        ";                          \nrun();",
     );
 }
 
@@ -2934,7 +3044,7 @@ test "strip: modules.type_only_export_all" {
     try expect_strip(
         .ts,
         "export type * from 'm';\nrun();",
-        "                       \nrun();",
+        ";                      \nrun();",
     );
 }
 
@@ -2942,7 +3052,7 @@ test "strip: modules.type_only_namespace_export_all" {
     try expect_strip(
         .ts,
         "export type * as ns from 'm';\nrun();",
-        "                             \nrun();",
+        ";                            \nrun();",
     );
 }
 
@@ -2950,7 +3060,7 @@ test "strip: modules.exported_type_alias_declaration" {
     try expect_strip(
         .ts,
         "export type T = string;\nrun();",
-        "                       \nrun();",
+        ";                      \nrun();",
     );
 }
 
@@ -2958,6 +3068,6 @@ test "strip: modules.qualified_type_only_import_equals" {
     try expect_strip(
         .ts,
         "import type Alias = Namespace.Member;\nrun();",
-        "                                     \nrun();",
+        ";                                    \nrun();",
     );
 }

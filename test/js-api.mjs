@@ -5,7 +5,7 @@ export function runApiTests({ stripTypes, transform }, label) {
 	assert.equal(transform("const answer: number = 42;\n"), "const answer         = 42;\n");
 	assert.equal(
 		stripTypes("export type Answer = number;\nexport const answer = 42;\n"),
-		"                            \nexport const answer = 42;\n",
+		";                           \nexport const answer = 42;\n",
 	);
 	assert.equal(
 		stripTypes("const element = <Component<Type> value={input as Type} />;\n", { lang: "tsx" }),

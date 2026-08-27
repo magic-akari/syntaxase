@@ -24,7 +24,7 @@ test "stripTypes is callable through the public module" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings(
-        "                            \nexport const answer = 42;\n",
+        ";                           \nexport const answer = 42;\n",
         result.code,
     );
     try std.testing.expectEqual(@as(usize, 0), result.diagnostics.len);
@@ -56,7 +56,7 @@ test "native into APIs append to caller-owned output" {
     );
     defer stripped.deinit(allocator);
     try std.testing.expectEqualStrings(
-        "prefix:const value         = 1;\n                \n",
+        "prefix:const value         = 1;\n;               \n",
         output.items,
     );
 }
