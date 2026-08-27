@@ -6,11 +6,15 @@ Named like an enzyme, Syntaxase removes erasable TypeScript syntax and lowers su
 
 ## Install
 
+[![npm](https://img.shields.io/npm/v/syntaxase?label=syntaxase)](https://www.npmjs.com/package/syntaxase)
+
 ```sh
 npm install syntaxase
 ```
 
-For WebAssembly environments, install the separately published package:
+For WebAssembly environments, install the separately published package
+
+[![npm](https://img.shields.io/npm/v/syntaxase-wasm?label=syntaxase-wasm)](https://www.npmjs.com/package/syntaxase-wasm)
 
 ```sh
 npm install syntaxase-wasm
