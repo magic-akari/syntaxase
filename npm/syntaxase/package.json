@@ -1,6 +1,6 @@
 {
   "name": "syntaxase",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Lightning-fast type stripping and JSX lowering",
   "license": "MIT OR Apache-2.0",
   "repository": {
@@ -17,17 +17,17 @@
     "options.js"
   ],
   "optionalDependencies": {
-    "@syntaxase/binding-linux-x64-gnu": "0.1.1",
-    "@syntaxase/binding-linux-arm64-gnu": "0.1.1",
-    "@syntaxase/binding-linux-arm-gnu": "0.1.1",
-    "@syntaxase/binding-linux-x64-musl": "0.1.1",
-    "@syntaxase/binding-linux-arm64-musl": "0.1.1",
-    "@syntaxase/binding-linux-arm-musl": "0.1.1",
-    "@syntaxase/binding-darwin-x64": "0.1.1",
-    "@syntaxase/binding-darwin-arm64": "0.1.1",
-    "@syntaxase/binding-win32-x64": "0.1.1",
-    "@syntaxase/binding-win32-arm64": "0.1.1",
-    "@syntaxase/binding-freebsd-x64": "0.1.1"
+    "@syntaxase/binding-linux-x64-gnu": "0.1.2",
+    "@syntaxase/binding-linux-arm64-gnu": "0.1.2",
+    "@syntaxase/binding-linux-arm-gnu": "0.1.2",
+    "@syntaxase/binding-linux-x64-musl": "0.1.2",
+    "@syntaxase/binding-linux-arm64-musl": "0.1.2",
+    "@syntaxase/binding-linux-arm-musl": "0.1.2",
+    "@syntaxase/binding-darwin-x64": "0.1.2",
+    "@syntaxase/binding-darwin-arm64": "0.1.2",
+    "@syntaxase/binding-win32-x64": "0.1.2",
+    "@syntaxase/binding-win32-arm64": "0.1.2",
+    "@syntaxase/binding-freebsd-x64": "0.1.2"
   },
   "author": "magic-akari <akari.ccino@gmail.com>",
   "homepage": "https://github.com/magic-akari/syntaxase",
