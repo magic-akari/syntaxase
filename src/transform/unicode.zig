@@ -42,12 +42,27 @@ pub fn append_blanked(
     var offset: usize = 0;
 
     while (offset < source.len) {
-        const plain_ascii_end = next_blanking_candidate(source, offset);
-        if (plain_ascii_end > offset) {
-            const length = plain_ascii_end - offset;
-            @memset(destination[written..][0..length], ' ');
-            written += length;
-            offset = plain_ascii_end;
+        // Transform complete ASCII vectors in one pass. Tabs and line
+        // terminators are selected from the source while every other lane
+        // becomes a space; a high byte falls through to code-point handling.
+        if (std.simd.suggestVectorLength(u8)) |vector_len| {
+            const ByteVector = @Vector(vector_len, u8);
+            const high_bit: ByteVector = @splat(0x80);
+            const tab: ByteVector = @splat('\t');
+            const cr: ByteVector = @splat('\r');
+            const lf: ByteVector = @splat('\n');
+            const space: ByteVector = @splat(' ');
+
+            while (offset + vector_len <= source.len) {
+                const bytes: ByteVector = source[offset..][0..vector_len].*;
+                if (@reduce(.Or, bytes >= high_bit)) break;
+
+                const preserved = (bytes == tab) | (bytes == cr) | (bytes == lf);
+                destination[written..][0..vector_len].* =
+                    @select(u8, preserved, bytes, space);
+                written += vector_len;
+                offset += vector_len;
+            }
             if (offset == source.len) break;
         }
 
@@ -80,35 +95,6 @@ pub fn append_blanked(
         }
     }
     output.items.len += written;
-}
-
-/// Finds the first byte that cannot be erased as an ordinary ASCII space.
-/// Vector blocks are only consumed when every byte is ASCII and none is a
-/// preserved tab or line terminator, so UTF-8 decoding always resumes at an
-/// original code-point boundary.
-inline fn next_blanking_candidate(source: []const u8, start: usize) usize {
-    var offset = start;
-    if (std.simd.suggestVectorLength(u8)) |vector_len| {
-        const ByteVector = @Vector(vector_len, u8);
-        const high_bit: ByteVector = @splat(0x80);
-        const tab: ByteVector = @splat('\t');
-        const cr: ByteVector = @splat('\r');
-        const lf: ByteVector = @splat('\n');
-        while (offset + vector_len <= source.len) : (offset += vector_len) {
-            const bytes: ByteVector = source[offset..][0..vector_len].*;
-            const candidates = (bytes >= high_bit) |
-                (bytes == tab) |
-                (bytes == cr) |
-                (bytes == lf);
-            if (@reduce(.Or, candidates)) break;
-        }
-    }
-
-    while (offset < source.len) : (offset += 1) {
-        const byte = source[offset];
-        if (byte >= 0x80 or byte == '\t' or byte == '\r' or byte == '\n') break;
-    }
-    return offset;
 }
 
 fn append_blanked_scalar(

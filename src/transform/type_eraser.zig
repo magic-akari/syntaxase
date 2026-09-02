@@ -59,7 +59,8 @@ const Visitor = struct {
     tokens: token_cursor.TokenCursor,
     runtime: ?*runtime_transformer.RuntimeFeatureCollection,
     exported_enums: std.StringHashMapUnmanaged(void) = .empty,
-    statement_cursors: [256]StatementListCursor = @splat(.{}),
+    statement_cursors: [256]StatementListCursor = undefined,
+    initialized_statement_cursors: std.StaticBitSet(256) = .empty,
 
     pub fn enter_node(
         self: *Visitor,
@@ -594,7 +595,12 @@ const Visitor = struct {
         }
 
         const cursor = &self.statement_cursors[parent_depth];
-        if (cursor.parent != parent_index) cursor.* = .{ .parent = parent_index };
+        if (!self.initialized_statement_cursors.isSet(parent_depth)) {
+            cursor.* = .{ .parent = parent_index };
+            self.initialized_statement_cursors.set(parent_depth);
+        } else if (cursor.parent != parent_index) {
+            cursor.* = .{ .parent = parent_index };
+        }
 
         var previous = cursor.previous;
         var position = cursor.next_position;
