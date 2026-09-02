@@ -20,7 +20,6 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 20
         env:
-            CARGO_TARGET_DIR: ${{ runner.temp }}/gungraun-target
             GUNGRAUN_COLOR: never
         steps:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -64,6 +63,7 @@ jobs:
               shell: bash
               env:
                   BASE_SHA: ${{ steps.revisions.outputs.base_sha }}
+                  CARGO_TARGET_DIR: ${{ runner.temp }}/gungraun-target
                   COMPARE_SHA: ${{ steps.revisions.outputs.compare_sha }}
               run: |
                   git checkout --detach "$BASE_SHA"
@@ -87,6 +87,7 @@ jobs:
               shell: bash
               env:
                   BASE_SHA: ${{ steps.revisions.outputs.base_sha }}
+                  CARGO_TARGET_DIR: ${{ runner.temp }}/gungraun-target
                   COMPARE_SHA: ${{ steps.revisions.outputs.compare_sha }}
                   COMPARISON_LABEL: ${{ steps.revisions.outputs.comparison_label }}
               run: |
