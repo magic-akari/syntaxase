@@ -12,6 +12,12 @@ const Allocator = std.mem.Allocator;
 const Ctx = parser.traverser.basic.Ctx;
 const NodeIndex = parser.ast.NodeIndex;
 
+const StatementListCursor = struct {
+    parent: NodeIndex = .null,
+    next_position: usize = 0,
+    previous: NodeIndex = .null,
+};
+
 /// Collects the first source-preserving TypeScript erasures directly from the
 /// native Yuku AST. All registered positions remain original UTF-8 byte spans.
 pub fn erase(
@@ -53,6 +59,7 @@ const Visitor = struct {
     tokens: token_cursor.TokenCursor,
     runtime: ?*runtime_transformer.RuntimeFeatureCollection,
     exported_enums: std.StringHashMapUnmanaged(void) = .empty,
+    statement_cursors: [256]StatementListCursor = @splat(.{}),
 
     pub fn enter_node(
         self: *Visitor,
@@ -139,7 +146,7 @@ const Visitor = struct {
         index: NodeIndex,
         ctx: *Ctx,
     ) Allocator.Error!Action {
-        try self.erase_suffix_expression(expression.expression, index, ctx);
+        try self.erase_postfix_type_assertion(expression.expression, index, ctx);
         return .proceed;
     }
 
@@ -149,7 +156,7 @@ const Visitor = struct {
         index: NodeIndex,
         ctx: *Ctx,
     ) Allocator.Error!Action {
-        try self.erase_suffix_expression(expression.expression, index, ctx);
+        try self.erase_postfix_type_assertion(expression.expression, index, ctx);
         return .proceed;
     }
 
@@ -566,8 +573,59 @@ const Visitor = struct {
     fn erase_whole_node(self: *Visitor, index: NodeIndex, ctx: *Ctx) Allocator.Error!void {
         const span = ctx.tree.span(index);
         try self.edits.add_blank(span.start, span.end);
-        if (!needs_semicolon_before_erasure(index, ctx, self.tokens.source)) return;
+        if (!self.needs_semicolon_before_erasure(index, ctx)) return;
 
+        try self.add_statement_separator(span);
+    }
+
+    fn needs_semicolon_before_erasure(
+        self: *Visitor,
+        index: NodeIndex,
+        ctx: *Ctx,
+    ) bool {
+        const parent_index = ctx.path.parent() orelse return false;
+        const parent = ctx.tree.data(parent_index);
+        if (is_required_statement_slot(parent, index)) return true;
+
+        const statements = statement_list(ctx.tree, parent) orelse return false;
+        const parent_depth = ctx.path.depth() - 1;
+        if (parent_depth >= self.statement_cursors.len) {
+            return needs_semicolon_before_erasure_slow(index, ctx, self.tokens.source);
+        }
+
+        const cursor = &self.statement_cursors[parent_depth];
+        if (cursor.parent != parent_index) cursor.* = .{ .parent = parent_index };
+
+        var previous = cursor.previous;
+        var position = cursor.next_position;
+        while (position < statements.len) : (position += 1) {
+            const statement = statements[position];
+            if (statement == .null) continue;
+            if (statement != index) {
+                previous = statement;
+                continue;
+            }
+
+            cursor.next_position = position + 1;
+            cursor.previous = statement;
+            if (previous != .null) {
+                if (is_erasable_statement(ctx.tree, previous)) return false;
+                const previous_span = ctx.tree.span(previous);
+                return previous_span.end > 0 and
+                    self.tokens.source[previous_span.end - 1] != ';';
+            }
+            return switch (parent) {
+                .program, .function_body, .ts_module_block => true,
+                else => false,
+            };
+        }
+        return needs_semicolon_before_erasure_slow(index, ctx, self.tokens.source);
+    }
+
+    fn add_statement_separator(
+        self: *Visitor,
+        span: parser.ast.Span,
+    ) Allocator.Error!void {
         const first = self.tokens.first_in_range(span.start, span.end) orelse return;
         try self.edits.add_substitution(first.span.start, .semicolon);
     }
@@ -705,7 +763,7 @@ const Visitor = struct {
     ) Allocator.Error!void {
         if (!hazardous_key or protected_by_javascript_syntax) return;
         if (first_erased_modifier != member_span.start) return;
-        if (!needs_semicolon_before_erasure(index, ctx, self.tokens.source)) return;
+        if (!self.needs_semicolon_before_erasure(index, ctx)) return;
 
         try self.edits.add_substitution(member_span.start, .semicolon);
     }
@@ -813,9 +871,38 @@ const Visitor = struct {
         }
 
         try self.edits.add_blank(expression_span.end, wrapper_span.end);
-        if (self.ends_containing_statement(wrapper_span, ctx)) {
-            try self.edits.add_substitution(expression_span.end, .semicolon);
-        }
+    }
+
+    fn erase_postfix_type_assertion(
+        self: *Visitor,
+        expression_index: NodeIndex,
+        wrapper_index: NodeIndex,
+        ctx: *Ctx,
+    ) Allocator.Error!void {
+        try self.erase_suffix_expression(expression_index, wrapper_index, ctx);
+
+        const wrapper_span = ctx.tree.span(wrapper_index);
+        if (!self.ends_containing_statement(wrapper_span, ctx)) return;
+
+        const source = self.tokens.source;
+        if (wrapper_span.end >= source.len) return;
+
+        const following = source[wrapper_span.end];
+        if (following > ' ' and following < 0x80 and following != '/') return;
+
+        const next = self.tokens.at_or_after(wrapper_span.end) orelse return;
+        if (!source_layout.contains_line_terminator(
+            source[wrapper_span.end..next.span.start],
+        )) return;
+
+        const next_text = self.tokens.text(next);
+        const is_hazardous = std.mem.eql(u8, next_text, "(") or
+            std.mem.eql(u8, next_text, "[") or
+            (next.type == .template and next_text.len > 0 and next_text[0] == '`');
+        if (!is_hazardous) return;
+
+        const expression_span = ctx.tree.span(expression_index);
+        try self.edits.add_substitution(expression_span.end, .semicolon);
     }
 
     fn move_opening_parenthesis_across_multiline_type_parameters(
@@ -1108,7 +1195,7 @@ fn is_horizontal_whitespace(byte: u8) bool {
     return byte == ' ' or byte == '\t' or byte == '\x0b' or byte == '\x0c';
 }
 
-fn needs_semicolon_before_erasure(
+fn needs_semicolon_before_erasure_slow(
     index: NodeIndex,
     ctx: *Ctx,
     source: []const u8,
@@ -1940,6 +2027,22 @@ test "strip: asi.satisfies_assertion_before_computed_statement" {
         .ts,
         "value satisfies Type\n[next]();",
         "value;              \n[next]();",
+    );
+}
+
+test "strip: asi.suffix_assertion_before_safe_statement_needs_no_separator" {
+    try expect_strip(
+        .ts,
+        "value as Type\nnext();",
+        "value        \nnext();",
+    );
+}
+
+test "strip: asi.suffix_assertion_before_template_statement" {
+    try expect_strip(
+        .ts,
+        "value as Type\n`next`;",
+        "value;       \n`next`;",
     );
 }
 

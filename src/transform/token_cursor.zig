@@ -40,6 +40,12 @@ pub const TokenCursor = struct {
         return std.mem.eql(u8, actual, expected);
     }
 
+    pub fn at_or_after(self: *const TokenCursor, position: u32) ?Token {
+        const index = self.index_containing_or_after(position);
+        if (index >= self.tokens.len) return null;
+        return self.tokens[index];
+    }
+
     /// Returns the first parser token fully contained in the byte interval.
     pub fn first_in_range(self: *const TokenCursor, start: u32, end: u32) ?Token {
         var index = self.index_containing_or_after(start);
@@ -169,6 +175,27 @@ test "seek selects a containing or following token" {
 
     cursor.seek(@intCast(source.len));
     try std.testing.expect(cursor.current() == null);
+}
+
+test "at_or_after finds containing and following tokens" {
+    const source = "const value: Foo = input;";
+    var tree = try parser.parse(std.testing.allocator, source, .{
+        .lang = .ts,
+        .comments = .flat,
+        .tokens = true,
+    });
+    defer tree.deinit();
+
+    var cursor = TokenCursor.init(source, tree.tokens);
+
+    const annotation = cursor.at_or_after(13) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("Foo", cursor.text(annotation));
+
+    const initializer = cursor.at_or_after(19) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("input", cursor.text(initializer));
+
+    const backwards = cursor.at_or_after(6) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("value", cursor.text(backwards));
 }
 
 test "cursor moves across parser-rescanned TypeScript tokens" {
