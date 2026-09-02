@@ -35,7 +35,7 @@ jobs:
                   toolchain: 1.98.0
                   cache: false
             - name: Install Gungraun and Valgrind
-              uses: gungraun/setup-gungraun@0467a72f0c206af5f965e6e70426f9230a1c067a # v1
+              uses: gungraun/setup-gungraun@62591572561bb2f4ed2ae300b8a8bea99ea8ddaf # v1
               with:
                   runner-version: 0.19.4
             - name: Resolve comparison revisions
