@@ -10,20 +10,21 @@ pub fn add(
     });
     const yuku_parser = yuku.module("parser");
 
-    const syntaxase = b.createModule(.{
-        .root_source_file = b.path("src/root.zig"),
+    const syntaxase_benchmark = b.createModule(.{
+        .root_source_file = b.path("src/benchmark_root.zig"),
         .target = target,
         .optimize = .ReleaseFast,
     });
-    syntaxase.addImport("parser", yuku_parser);
-    syntaxase.addImport("yuku_util", yuku_parser.import_table.get("util").?);
+    syntaxase_benchmark.addImport("parser", yuku_parser);
+    syntaxase_benchmark.addImport("yuku_util", yuku_parser.import_table.get("util").?);
 
     const native_module = b.createModule(.{
         .root_source_file = b.path("benchmark/native.zig"),
         .target = target,
         .optimize = .ReleaseFast,
+        .valgrind = target.result.os.tag == .linux,
     });
-    native_module.addImport("syntaxase", syntaxase);
+    native_module.addImport("syntaxase", syntaxase_benchmark);
 
     const native = b.addExecutable(.{
         .name = "syntaxase-native-benchmark",

@@ -140,6 +140,22 @@ description = "Compare warmed native Syntaxase and Oxc transforms"
 depends = ["bench:prepare", "deps:zig"]
 run = ["zig build benchmark-native", "node --expose-gc benchmark/compare.mjs"]
 
+[tasks."bench:callgrind"]
+description = "Compare Syntaxase instruction counts with the saved local baseline"
+depends = ["bench:prepare", "deps:zig"]
+run = [
+  "zig build benchmark-native",
+  "cargo bench --locked --manifest-path benchmark/gungraun/Cargo.toml --target-dir benchmark/.cache/gungraun-target --bench type-strip -- --home=\"$PWD/benchmark/.cache/gungraun-results\" --baseline=local",
+]
+
+[tasks."bench:callgrind:baseline"]
+description = "Replace the saved local Syntaxase instruction-count baseline"
+depends = ["bench:prepare", "deps:zig"]
+run = [
+  "zig build benchmark-native",
+  "cargo bench --locked --manifest-path benchmark/gungraun/Cargo.toml --target-dir benchmark/.cache/gungraun-target --bench type-strip -- --home=\"$PWD/benchmark/.cache/gungraun-results\" --save-baseline=local",
+]
+
 [tasks."bench:wasm"]
 description = "Compare warmed browser WebAssembly transforms"
 depends = ["bench:prepare", "build:wasm-stage"]

@@ -230,6 +230,26 @@ mise run bench:wasm
 The browser lane compares Syntaxase with the official Oxc browser package,
 Babel, Sucrase, and ts-blank-space where their behavior is comparable.
 
+Gungraun is a separate longitudinal benchmark for Syntaxase itself. Save a
+local instruction-count baseline before changing a performance path:
+
+```sh
+mise run bench:callgrind:baseline
+```
+
+Then compare the working tree against that saved baseline:
+
+```sh
+mise run bench:callgrind
+```
+
+The benchmark only runs Syntaxase. It loads each corpus before entering the
+exported strip function, disables branch and cache simulation, and reports
+Callgrind `Ir`. It requires Linux, Valgrind, and `gungraun-runner` 0.19.4.
+Treat `Ir` as the primary metric; branch and cache simulation are intentionally
+disabled. Pull requests run the base and merge revisions in the same Linux CI
+job with the same toolchain and benchmark harness.
+
 Initialization, dependency loading, input I/O, option construction, and warmup
 are outside timed regions. Encoding, linear-memory copies, transformation, and
 decoding remain inside each timed public WebAssembly call.

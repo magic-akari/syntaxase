@@ -1,12 +1,14 @@
 const std = @import("std");
 const syntaxase = @import("syntaxase");
 
+const type_strip_benchmark = syntaxase.type_strip_benchmark;
+
 const warmup_nanoseconds = 300 * std.time.ns_per_ms;
 const sample_nanoseconds = 100 * std.time.ns_per_ms;
 const sample_count = 7;
 
-const Action = enum { inspect, measure };
-const Mode = enum { strip, jsx };
+const Action = enum { inspect, measure, callgrind };
+const Mode = enum { strip, jsx, stages };
 
 pub fn main(init: std.process.Init) !void {
     const allocator = std.heap.smp_allocator;
@@ -27,7 +29,54 @@ pub fn main(init: std.process.Init) !void {
     switch (action) {
         .inspect => try inspect(io, allocator, source, mode),
         .measure => try measure(io, allocator, source, mode),
+        .callgrind => try callgrind(source, mode),
     }
+}
+
+fn callgrind(source: []const u8, mode: Mode) !void {
+    if (mode != .stages) return error.UnsupportedMode;
+    const checksum = try callgrind_stages(source);
+    std.mem.doNotOptimizeAway(checksum);
+}
+
+fn callgrind_stages(source: []const u8) !usize {
+    const allocator = std.heap.smp_allocator;
+    const callgrind_client = std.valgrind.callgrind;
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const scratch = arena.allocator();
+
+    callgrind_client.toggleCollect();
+    var file = try type_strip_benchmark.parse(scratch, source);
+    callgrind_client.toggleCollect();
+    callgrind_client.dumpStatsAt("parse");
+    defer file.deinit();
+
+    var edits = type_strip_benchmark.init_edits(scratch, &file);
+    defer edits.deinit();
+    callgrind_client.toggleCollect();
+    try type_strip_benchmark.erase(&file, &edits);
+    callgrind_client.toggleCollect();
+    callgrind_client.dumpStatsAt("erase");
+
+    callgrind_client.toggleCollect();
+    var plan = try type_strip_benchmark.seal(&edits);
+    callgrind_client.toggleCollect();
+    callgrind_client.dumpStatsAt("seal");
+    defer plan.deinit();
+
+    var output: std.ArrayList(u8) = .empty;
+    defer output.deinit(allocator);
+    callgrind_client.toggleCollect();
+    try type_strip_benchmark.render_into(&plan, &output, allocator);
+    callgrind_client.toggleCollect();
+
+    var expected = try syntaxase.stripTypes(allocator, source, .{});
+    defer expected.deinit(allocator);
+    if (!std.mem.eql(u8, output.items, expected.code)) {
+        return error.TypeStripBenchmarkOutputMismatch;
+    }
+    return output.items.len;
 }
 
 fn inspect(
@@ -134,5 +183,6 @@ fn transform_once(
         .jsx => syntaxase.transform(allocator, source, .{
             .jsx = .{ .automatic = .{} },
         }),
+        .stages => error.UnsupportedMode,
     };
 }

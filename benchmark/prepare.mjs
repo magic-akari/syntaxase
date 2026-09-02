@@ -1,9 +1,12 @@
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import path from "node:path";
 import process from "node:process";
 
 import { BENCHMARK_CORPUS, CACHE_DIRECTORY, corpusCachePath, verifyCorpus } from "./corpus.mjs";
 
 await mkdir(CACHE_DIRECTORY, { recursive: true });
+const gungraunDirectory = path.join(CACHE_DIRECTORY, "gungraun");
+await mkdir(gungraunDirectory, { recursive: true });
 
 const preparedCorpus = [];
 for (const corpus of BENCHMARK_CORPUS) {
@@ -25,6 +28,7 @@ for (const corpus of BENCHMARK_CORPUS) {
 	} else {
 		verifyCorpus(corpus, buffer, cachePath);
 	}
+	await writeCacheFile(gungraunCorpusPath(corpus), buffer);
 
 	preparedCorpus.push({ corpus, source: buffer.toString("utf8") });
 	process.stdout.write(`ready      ${corpus.id} (${formatBytes(buffer.length)})\n`);
@@ -67,4 +71,9 @@ async function writeCacheFile(cachePath, buffer) {
 
 function formatBytes(bytes) {
 	return `${(bytes / 1024).toFixed(1)} KiB`;
+}
+
+function gungraunCorpusPath(corpus) {
+	const extension = path.extname(corpus.upstreamPath);
+	return path.join(gungraunDirectory, `${corpus.id}${extension}`);
 }

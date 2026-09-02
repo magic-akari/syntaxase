@@ -1,0 +1,13 @@
+[package]
+name = "syntaxase-gungraun-benchmark"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autobenches = false
+
+[dev-dependencies]
+gungraun = "0.19.4"
+
+[[bench]]
+name = "type-strip"
+harness = false

@@ -8,5 +8,6 @@
 /npm/*/@*/binding-*/*.node
 /npm/syntaxase-wasm/wasm.js
 /benchmark/.cache/
+/benchmark/gungraun/target/
 /benchmark/node_modules/
 /.DS_Store
