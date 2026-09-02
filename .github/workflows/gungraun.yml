@@ -20,6 +20,7 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 20
         env:
+            BENCHMARK_CPU: x86_64_v3
             GUNGRAUN_COLOR: never
         steps:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -77,7 +78,7 @@ jobs:
                     src/transform/type_strip_benchmark.zig
                   node benchmark/prepare.mjs
                   zig build --fetch
-                  zig build benchmark-native
+                  zig build -Dcpu="$BENCHMARK_CPU" benchmark-native
                   cargo bench --quiet --locked \
                     --manifest-path benchmark/gungraun/Cargo.toml \
                     --bench type-strip -- \
@@ -94,7 +95,7 @@ jobs:
                   git checkout --detach "$COMPARE_SHA"
                   node benchmark/prepare.mjs
                   zig build --fetch
-                  zig build benchmark-native
+                  zig build -Dcpu="$BENCHMARK_CPU" benchmark-native
 
                   report="$RUNNER_TEMP/gungraun-report.txt"
                   summary="$RUNNER_TEMP/gungraun-summary.md"
@@ -159,6 +160,7 @@ jobs:
                   jq -n \
                     --arg artifact_name "$artifact_name" \
                     --arg base_sha "$BASE_SHA" \
+                    --arg benchmark_cpu "$BENCHMARK_CPU" \
                     --arg cargo_version "$cargo_version" \
                     --arg compare_sha "$COMPARE_SHA" \
                     --arg event_name "$EVENT_NAME" \
@@ -205,7 +207,8 @@ jobs:
                       benchmark: {
                         package: "syntaxase-gungraun-benchmark",
                         bench: "type-strip",
-                        baseline: "base"
+                        baseline: "base",
+                        cpu: $benchmark_cpu
                       },
                       files: {
                         data_root: "gungraun",
