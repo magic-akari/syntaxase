@@ -68,14 +68,13 @@ jobs:
                   COMPARE_SHA: ${{ steps.revisions.outputs.compare_sha }}
               run: |
                   git checkout --detach "$BASE_SHA"
+                  # Share workloads; keep internal adapters with the measured revision.
                   git checkout "$COMPARE_SHA" -- \
                     benchmark/corpus.mjs \
                     benchmark/build_steps.zig \
                     benchmark/prepare.mjs \
                     benchmark/native.zig \
-                    benchmark/gungraun \
-                    src/benchmark_root.zig \
-                    src/transform/type_strip_benchmark.zig
+                    benchmark/gungraun
                   node benchmark/prepare.mjs
                   zig build --fetch
                   zig build -Dcpu="$BENCHMARK_CPU" benchmark-native

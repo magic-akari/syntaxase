@@ -2,7 +2,7 @@ const std = @import("std");
 const parser = @import("parser");
 const comment_cursor_module = @import("comment_cursor.zig");
 const source_layout_module = @import("source_layout.zig");
-const token_cursor_module = @import("token_cursor.zig");
+const token_index_module = @import("token_index.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -53,8 +53,8 @@ pub const SourceFile = struct {
         return self.tree.source;
     }
 
-    pub fn token_cursor(self: *const SourceFile) token_cursor_module.TokenCursor {
-        return token_cursor_module.TokenCursor.init(self.tree.source, self.tree.tokens);
+    pub fn token_index(self: *const SourceFile) token_index_module.TokenIndex {
+        return token_index_module.TokenIndex.init(self.tree.source, self.tree.tokens);
     }
 
     pub fn comment_cursor(self: *const SourceFile) comment_cursor_module.CommentCursor {
@@ -71,9 +71,8 @@ test "source file collects parser-authoritative tokens and comments" {
     try std.testing.expect(file.tree.tokens.len > 0);
     try std.testing.expectEqual(@as(usize, 1), file.tree.comments.len);
 
-    var cursor = file.token_cursor();
-    cursor.seek(11);
-    try std.testing.expect(cursor.current_is(":"));
+    const tokens = file.token_index();
+    try std.testing.expectEqual(.colon, tokens.at(11).?.tag);
 }
 
 test "source file preserves Yuku diagnostics without rejecting the tree" {

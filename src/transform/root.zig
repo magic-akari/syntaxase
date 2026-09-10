@@ -7,7 +7,7 @@ const runtime_edit_buffer = @import("runtime_edit_buffer.zig");
 const runtime_name_allocator = @import("runtime_name_allocator.zig");
 const runtime_transformer = @import("runtime_transformer.zig");
 const source_file = @import("source_file.zig");
-const token_cursor = @import("token_cursor.zig");
+const token_index = @import("token_index.zig");
 const type_eraser = @import("type_eraser.zig");
 const unicode = @import("unicode.zig");
 
@@ -293,7 +293,7 @@ fn strip_file_into(
 ) Error!void {
     var edits = fixed_edit_buffer.FixedEditBuffer.init(scratch, file.source());
     defer edits.deinit();
-    try type_eraser.erase(&file.tree, file.token_cursor(), &edits);
+    try type_eraser.erase(&file.tree, file.token_index(), &edits);
 
     var fixed = try edits.seal();
     defer fixed.deinit();
@@ -317,7 +317,7 @@ fn lower_file_into(
 
     try type_eraser.erase_and_collect(
         &file.tree,
-        file.token_cursor(),
+        file.token_index(),
         &edits,
         &runtime_features,
     );
@@ -794,7 +794,7 @@ test {
     _ = runtime_name_allocator;
     _ = runtime_transformer;
     _ = source_file;
-    _ = token_cursor;
+    _ = token_index;
     _ = type_eraser;
     _ = unicode;
 }

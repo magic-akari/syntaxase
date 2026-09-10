@@ -4,7 +4,7 @@ const fixed_edit_buffer = @import("fixed_edit_buffer.zig");
 const namespace_semantics = @import("namespace_semantics.zig");
 const runtime_transformer = @import("runtime_transformer.zig");
 const source_layout = @import("source_layout.zig");
-const token_cursor = @import("token_cursor.zig");
+const token_index = @import("token_index.zig");
 const unicode = @import("unicode.zig");
 
 const Action = parser.traverser.Action;
@@ -22,7 +22,7 @@ const StatementListCursor = struct {
 /// native Yuku AST. All registered positions remain original UTF-8 byte spans.
 pub fn erase(
     tree: *const parser.ast.Tree,
-    tokens: token_cursor.TokenCursor,
+    tokens: token_index.TokenIndex,
     edits: *fixed_edit_buffer.FixedEditBuffer,
 ) Allocator.Error!void {
     return erase_internal(tree, tokens, edits, null);
@@ -32,7 +32,7 @@ pub fn erase(
 /// No second whole-tree traversal is required by `transform`.
 pub fn erase_and_collect(
     tree: *const parser.ast.Tree,
-    tokens: token_cursor.TokenCursor,
+    tokens: token_index.TokenIndex,
     edits: *fixed_edit_buffer.FixedEditBuffer,
     runtime: *runtime_transformer.RuntimeFeatureCollection,
 ) Allocator.Error!void {
@@ -41,7 +41,7 @@ pub fn erase_and_collect(
 
 fn erase_internal(
     tree: *const parser.ast.Tree,
-    tokens: token_cursor.TokenCursor,
+    tokens: token_index.TokenIndex,
     edits: *fixed_edit_buffer.FixedEditBuffer,
     runtime: ?*runtime_transformer.RuntimeFeatureCollection,
 ) Allocator.Error!void {
@@ -56,7 +56,7 @@ fn erase_internal(
 
 const Visitor = struct {
     edits: *fixed_edit_buffer.FixedEditBuffer,
-    tokens: token_cursor.TokenCursor,
+    tokens: token_index.TokenIndex,
     runtime: ?*runtime_transformer.RuntimeFeatureCollection,
     exported_enums: std.StringHashMapUnmanaged(void) = .empty,
     statement_cursors: [256]StatementListCursor = undefined,
@@ -229,14 +229,14 @@ const Visitor = struct {
             ctx.tree.span(class.body).start;
 
         if (class.abstract) {
-            _ = try self.erase_keyword(modifier_start, identifier_start, "abstract");
+            _ = try self.erase_token(modifier_start, identifier_start, .abstract);
         }
 
         const implemented = ctx.tree.extra(class.implements);
         if (implemented.len > 0) {
             const first = ctx.tree.span(implemented[0]);
             const last = ctx.tree.span(implemented[implemented.len - 1]);
-            if (self.tokens.find_backward(class_span.start, first.start, "implements")) |keyword| {
+            if (self.tokens.find_last(.{ .start = class_span.start, .end = first.start }, .implements)) |keyword| {
                 try self.edits.add_blank(keyword.span.start, last.end);
             }
         }
@@ -367,13 +367,13 @@ const Visitor = struct {
             parameters.rest;
         if (next_index != .null) {
             const next_span = ctx.tree.span(next_index);
-            if (self.tokens.find_forward(first_span.end, next_span.start, ",")) |comma| {
+            if (self.tokens.find_first(.{ .start = first_span.end, .end = next_span.start }, .comma)) |comma| {
                 try self.edits.add_blank(first_span.start, comma.span.end);
                 return .proceed;
             }
         } else {
             const parameters_span = ctx.tree.span(index);
-            if (self.tokens.find_forward(first_span.end, parameters_span.end, ",")) |comma| {
+            if (self.tokens.find_first(.{ .start = first_span.end, .end = parameters_span.end }, .comma)) |comma| {
                 try self.edits.add_blank(first_span.start, comma.span.end);
                 return .proceed;
             }
@@ -390,19 +390,11 @@ const Visitor = struct {
     ) Allocator.Error!Action {
         const span = ctx.tree.span(index);
         const parameter_start = ctx.tree.span(property.parameter).start;
-        if (property.accessibility != .none) {
-            _ = try self.erase_keyword(
-                span.start,
-                parameter_start,
-                property.accessibility.toString(),
-            );
-        }
-        if (property.readonly) {
-            _ = try self.erase_keyword(span.start, parameter_start, "readonly");
-        }
-        if (property.override) {
-            _ = try self.erase_keyword(span.start, parameter_start, "override");
-        }
+        _ = try self.erase_modifiers(.{ .start = span.start, .end = parameter_start }, .{
+            .accessibility = property.accessibility,
+            .readonly = property.readonly,
+            .override = property.override,
+        });
         return .proceed;
     }
 
@@ -420,7 +412,7 @@ const Visitor = struct {
             ctx.tree.span(annotation).start
         else
             id_span.end;
-        if (self.tokens.find_backward(id_span.start, marker_end, "!")) |marker| {
+        if (self.tokens.find_last(.{ .start = id_span.start, .end = marker_end }, .logical_not)) |marker| {
             try self.edits.add_blank(marker.span.start, marker.span.end);
         }
         return .proceed;
@@ -511,7 +503,7 @@ const Visitor = struct {
             {
                 const wrapper_span = ctx.tree.span(index);
                 const declaration_span = ctx.tree.span(inner);
-                if (self.tokens.find_forward(wrapper_span.start, declaration_span.start, "export")) |token| {
+                if (self.tokens.find_first(.{ .start = wrapper_span.start, .end = declaration_span.start }, .@"export")) |token| {
                     try self.edits.add_blank(token.span.start, token.span.end);
                 }
             } else {
@@ -529,7 +521,7 @@ const Visitor = struct {
                         if (entry.found_existing) {
                             const wrapper_span = ctx.tree.span(index);
                             const enum_span = ctx.tree.span(inner);
-                            if (self.tokens.find_forward(wrapper_span.start, enum_span.start, "export")) |token| {
+                            if (self.tokens.find_first(.{ .start = wrapper_span.start, .end = enum_span.start }, .@"export")) |token| {
                                 try self.edits.add_blank(token.span.start, token.span.end);
                             }
                         }
@@ -632,7 +624,7 @@ const Visitor = struct {
         self: *Visitor,
         span: parser.ast.Span,
     ) Allocator.Error!void {
-        const first = self.tokens.first_in_range(span.start, span.end) orelse return;
+        const first = self.tokens.first(span) orelse return;
         try self.edits.add_substitution(first.span.start, .semicolon);
     }
 
@@ -650,29 +642,14 @@ const Visitor = struct {
             property_span.start,
         );
 
-        var first_modifier_start: ?u32 = null;
-        if (property.readonly) {
-            if (try self.erase_keyword(search_start, key_span.start, "readonly")) |start| {
-                first_modifier_start = earliest_position(first_modifier_start, start);
-            }
-        }
-        if (property.override) {
-            if (try self.erase_keyword(search_start, key_span.start, "override")) |start| {
-                first_modifier_start = earliest_position(first_modifier_start, start);
-            }
-        }
-        if (property.accessibility != .none) {
-            if (try self.erase_keyword(
-                search_start,
-                key_span.start,
-                property.accessibility.toString(),
-            )) |start| {
-                first_modifier_start = earliest_position(first_modifier_start, start);
-            }
-        }
+        const first_modifier_start = try self.erase_modifiers(.{ .start = search_start, .end = key_span.start }, .{
+            .readonly = property.readonly,
+            .override = property.override,
+            .accessibility = property.accessibility,
+        });
 
-        const key_token = self.tokens.first_in_range(key_span.start, key_span.end);
-        const hazardous_key = property.computed or self.is_hazardous_class_key(key_token);
+        const key_token = self.tokens.first(key_span);
+        const hazardous_key = property.computed or is_hazardous_class_key(key_token);
         try self.separate_hazardous_class_element(
             index,
             property_span,
@@ -690,11 +667,11 @@ const Visitor = struct {
             marker_end = @min(marker_end, ctx.tree.span(property.value).start);
         }
         const optional_start = if (property.optional)
-            try self.erase_punctuation(key_span.end, marker_end, "?")
+            try self.erase_token(key_span.end, marker_end, .question)
         else
             null;
         const definite_start = if (property.definite)
-            try self.erase_punctuation(key_span.end, marker_end, "!")
+            try self.erase_token(key_span.end, marker_end, .logical_not)
         else
             null;
         const separator_start = if (property.type_annotation != .null)
@@ -702,7 +679,7 @@ const Visitor = struct {
         else
             optional_start orelse definite_start;
         try self.preserve_keyword_named_class_field(
-            key_span,
+            key_token,
             separator_start,
             property.value != .null,
         );
@@ -721,29 +698,18 @@ const Visitor = struct {
             method.decorators,
             method_span.start,
         );
-        var first_modifier_start: ?u32 = null;
-        if (method.override) {
-            if (try self.erase_keyword(search_start, key_span.start, "override")) |start| {
-                first_modifier_start = earliest_position(first_modifier_start, start);
-            }
-        }
-        if (method.accessibility != .none) {
-            if (try self.erase_keyword(
-                search_start,
-                key_span.start,
-                method.accessibility.toString(),
-            )) |start| {
-                first_modifier_start = earliest_position(first_modifier_start, start);
-            }
-        }
+        const first_modifier_start = try self.erase_modifiers(.{ .start = search_start, .end = key_span.start }, .{
+            .override = method.override,
+            .accessibility = method.accessibility,
+        });
         const function = switch (ctx.tree.data(method.value)) {
             .function => |value| value,
             else => unreachable,
         };
-        const key_token = self.tokens.first_in_range(key_span.start, key_span.end);
+        const key_token = self.tokens.first(key_span);
         const hazardous_key = method.computed or
             function.generator or
-            self.is_hazardous_class_key(key_token);
+            is_hazardous_class_key(key_token);
         try self.separate_hazardous_class_element(
             index,
             method_span,
@@ -754,7 +720,7 @@ const Visitor = struct {
         );
         if (method.optional) {
             const function_start = ctx.tree.span(method.value).start;
-            _ = try self.erase_punctuation(key_span.end, function_start, "?");
+            _ = try self.erase_token(key_span.end, function_start, .question);
         }
     }
 
@@ -775,58 +741,97 @@ const Visitor = struct {
     }
 
     fn is_hazardous_class_key(
-        self: *const Visitor,
         token: ?parser.ast.Token,
     ) bool {
         const key = token orelse return false;
-        const text = self.tokens.text(key);
-        return std.mem.eql(u8, text, "in") or std.mem.eql(u8, text, "instanceof");
+        return key.tag == .in or key.tag == .instanceof;
     }
 
     fn is_contextual_class_field_key(
-        self: *const Visitor,
         token: ?parser.ast.Token,
     ) bool {
         const key = token orelse return false;
-        const text = self.tokens.text(key);
-        return std.mem.eql(u8, text, "get") or
-            std.mem.eql(u8, text, "set") or
-            std.mem.eql(u8, text, "static");
+        return key.tag == .get or key.tag == .set or key.tag == .static;
     }
 
     fn preserve_keyword_named_class_field(
         self: *Visitor,
-        key_span: parser.ast.Span,
+        key: ?parser.ast.Token,
         separator_start: ?u32,
         has_value: bool,
     ) Allocator.Error!void {
         if (has_value) return;
         const separator = separator_start orelse return;
 
-        const key = self.tokens.first_in_range(key_span.start, key_span.end);
-        if (!self.is_contextual_class_field_key(key)) return;
+        if (!is_contextual_class_field_key(key)) return;
 
         try self.edits.add_substitution(separator, .semicolon);
     }
 
-    fn erase_keyword(
+    const ErasedModifiers = struct {
+        readonly: bool = false,
+        override: bool = false,
+        accessibility: parser.ast.Accessibility = .none,
+
+        fn is_empty(self: ErasedModifiers) bool {
+            return !self.readonly and !self.override and self.accessibility == .none;
+        }
+    };
+
+    /// Erases the first occurrence of each AST-selected modifier in source order.
+    fn erase_modifiers(
         self: *Visitor,
-        start: u32,
-        end: u32,
-        keyword: []const u8,
+        span: parser.ast.Span,
+        requested: ErasedModifiers,
     ) Allocator.Error!?u32 {
-        const token = self.tokens.find_forward(start, end, keyword) orelse return null;
-        try self.edits.add_blank(token.span.start, token.span.end);
-        return token.span.start;
+        var pending = requested;
+        if (pending.is_empty()) return null;
+        const count = @as(u8, @intFromBool(pending.readonly)) +
+            @as(u8, @intFromBool(pending.override)) +
+            @as(u8, @intFromBool(pending.accessibility != .none));
+        if (count == 1) {
+            const tag = if (pending.readonly)
+                .readonly
+            else if (pending.override)
+                .override
+            else
+                accessibility_tag(pending.accessibility);
+            return self.erase_token(span.start, span.end, tag);
+        }
+
+        var first: ?u32 = null;
+        var iterator = self.tokens.iterate(span);
+        while (iterator.next()) |token| {
+            switch (token.tag) {
+                .readonly => {
+                    if (!pending.readonly) continue;
+                    pending.readonly = false;
+                },
+                .override => {
+                    if (!pending.override) continue;
+                    pending.override = false;
+                },
+                .public, .protected, .private => {
+                    if (pending.accessibility == .none) continue;
+                    if (token.tag != accessibility_tag(pending.accessibility)) continue;
+                    pending.accessibility = .none;
+                },
+                else => continue,
+            }
+            try self.edits.add_blank(token.span.start, token.span.end);
+            if (first == null) first = token.span.start;
+            if (pending.is_empty()) break;
+        }
+        return first;
     }
 
-    fn erase_punctuation(
+    fn erase_token(
         self: *Visitor,
         start: u32,
         end: u32,
-        punctuation: []const u8,
+        tag: parser.ast.TokenTag,
     ) Allocator.Error!?u32 {
-        const token = self.tokens.find_forward(start, end, punctuation) orelse return null;
+        const token = self.tokens.find_first(.{ .start = start, .end = end }, tag) orelse return null;
         try self.edits.add_blank(token.span.start, token.span.end);
         return token.span.start;
     }
@@ -845,7 +850,7 @@ const Visitor = struct {
             ctx.tree.span(type_annotation).start
         else
             span.end;
-        if (self.tokens.find_backward(span.start, marker_end, "?")) |marker| {
+        if (self.tokens.find_last(.{ .start = span.start, .end = marker_end }, .question)) |marker| {
             try self.edits.add_blank(marker.span.start, marker.span.end);
         }
     }
@@ -890,21 +895,13 @@ const Visitor = struct {
         const wrapper_span = ctx.tree.span(wrapper_index);
         if (!self.ends_containing_statement(wrapper_span, ctx)) return;
 
-        const source = self.tokens.source;
-        if (wrapper_span.end >= source.len) return;
+        const next = self.tokens.after(wrapper_span.end) orelse return;
+        if (!next.hasLineTerminatorBefore()) return;
 
-        const following = source[wrapper_span.end];
-        if (following > ' ' and following < 0x80 and following != '/') return;
-
-        const next = self.tokens.at_or_after(wrapper_span.end) orelse return;
-        if (!source_layout.contains_line_terminator(
-            source[wrapper_span.end..next.span.start],
-        )) return;
-
-        const next_text = self.tokens.text(next);
-        const is_hazardous = std.mem.eql(u8, next_text, "(") or
-            std.mem.eql(u8, next_text, "[") or
-            (next.type == .template and next_text.len > 0 and next_text[0] == '`');
+        const is_hazardous = switch (next.tag) {
+            .left_paren, .left_bracket, .no_substitution_template, .template_head => true,
+            else => false,
+        };
         if (!is_hazardous) return;
 
         const expression_span = ctx.tree.span(expression_index);
@@ -926,7 +923,7 @@ const Visitor = struct {
             self.tokens.source[type_parameters.start..parameters.start],
         )) return;
 
-        const opening = self.tokens.find_forward(parameters.start, parameters.end, "(") orelse return;
+        const opening = self.tokens.find_first(.{ .start = parameters.start, .end = parameters.end }, .left_paren) orelse return;
         try self.edits.add_substitution(type_parameters.start, .left_parenthesis);
         try self.edits.add_blank(opening.span.start, opening.span.end);
     }
@@ -964,15 +961,12 @@ const Visitor = struct {
         const parameters = ctx.tree.span(arrow.params);
         const return_type = ctx.tree.span(arrow.return_type);
         const body = ctx.tree.span(arrow.body);
-        const arrow_token = self.tokens.find_forward(return_type.end, body.start, "=>") orelse return;
+        const arrow_token = self.tokens.find_first(.{ .start = return_type.end, .end = body.start }, .arrow) orelse return;
         if (!source_layout.contains_line_terminator(
             self.tokens.source[parameters.end..arrow_token.span.start],
         )) return;
 
-        const final_type_token = self.tokens.last_in_range(
-            return_type.start,
-            return_type.end,
-        ) orelse return;
+        const final_type_token = self.tokens.last(return_type) orelse return;
         const replacement_start = previous_scalar_start(
             self.tokens.source,
             final_type_token.span.end,
@@ -1081,12 +1075,12 @@ const Visitor = struct {
         const container = ctx.tree.span(container_index);
         const gap_end = if (next_index != .null)
             ctx.tree.span(next_index).start
-        else if (self.tokens.find_forward(item.end, container.end, "}")) |closing|
+        else if (self.tokens.find_first(.{ .start = item.end, .end = container.end }, .right_brace)) |closing|
             closing.span.start
         else
             container.end;
 
-        if (self.tokens.find_forward(item.end, gap_end, ",")) |comma| {
+        if (self.tokens.find_first(.{ .start = item.end, .end = gap_end }, .comma)) |comma| {
             try self.edits.add_blank(item.start, comma.span.end);
         } else {
             try self.edits.add_blank(item.start, item.end);
@@ -1316,10 +1310,6 @@ fn last_decorator_end(
     return tree.span(indices[indices.len - 1]).end;
 }
 
-fn earliest_position(current: ?u32, candidate: u32) u32 {
-    return if (current) |position| @min(position, candidate) else candidate;
-}
-
 fn pattern_type_annotation(tree: *const parser.ast.Tree, index: NodeIndex) NodeIndex {
     return switch (tree.data(index)) {
         .binding_identifier => |pattern| pattern.type_annotation,
@@ -1361,6 +1351,15 @@ fn is_whole_type_declaration(tree: *const parser.ast.Tree, index: NodeIndex) boo
     };
 }
 
+fn accessibility_tag(accessibility: parser.ast.Accessibility) parser.ast.TokenTag {
+    return switch (accessibility) {
+        .public => .public,
+        .protected => .protected,
+        .private => .private,
+        .none => unreachable,
+    };
+}
+
 test "eraser uses native spans for type syntax" {
     const allocator = std.testing.allocator;
     const source = "function id<T>(value: T): T { return id<string>(value); }\n";
@@ -1373,7 +1372,7 @@ test "eraser uses native spans for type syntax" {
 
     var edits = fixed_edit_buffer.FixedEditBuffer.init(allocator, source);
     defer edits.deinit();
-    try erase(&tree, token_cursor.TokenCursor.init(source, tree.tokens), &edits);
+    try erase(&tree, token_index.TokenIndex.init(source, tree.tokens), &edits);
 
     const output = try edits.render();
     defer allocator.free(output);
@@ -1401,7 +1400,7 @@ test "eraser removes whole type-only declarations" {
 
     var edits = fixed_edit_buffer.FixedEditBuffer.init(allocator, source);
     defer edits.deinit();
-    try erase(&tree, token_cursor.TokenCursor.init(source, tree.tokens), &edits);
+    try erase(&tree, token_index.TokenIndex.init(source, tree.tokens), &edits);
 
     const output = try edits.render();
     defer allocator.free(output);
@@ -1432,7 +1431,7 @@ test "whole-node erasure preserves an ASI statement boundary" {
 
     var edits = fixed_edit_buffer.FixedEditBuffer.init(allocator, source);
     defer edits.deinit();
-    try erase(&tree, token_cursor.TokenCursor.init(source, tree.tokens), &edits);
+    try erase(&tree, token_index.TokenIndex.init(source, tree.tokens), &edits);
 
     const output = try edits.render();
     defer allocator.free(output);
@@ -1464,7 +1463,7 @@ test "type-only namespaces erase while runtime namespaces remain for lowering" {
 
     var edits = fixed_edit_buffer.FixedEditBuffer.init(allocator, source);
     defer edits.deinit();
-    try erase(&tree, token_cursor.TokenCursor.init(source, tree.tokens), &edits);
+    try erase(&tree, token_index.TokenIndex.init(source, tree.tokens), &edits);
 
     const output = try edits.render();
     defer allocator.free(output);
@@ -1503,7 +1502,7 @@ test "eraser removes native class TypeScript syntax and ambient declarations" {
 
     var edits = fixed_edit_buffer.FixedEditBuffer.init(allocator, source);
     defer edits.deinit();
-    try erase(&tree, token_cursor.TokenCursor.init(source, tree.tokens), &edits);
+    try erase(&tree, token_index.TokenIndex.init(source, tree.tokens), &edits);
 
     const output = try edits.render();
     defer allocator.free(output);
@@ -1540,7 +1539,7 @@ test "eraser removes parameter and binding-only syntax" {
 
     var edits = fixed_edit_buffer.FixedEditBuffer.init(allocator, source);
     defer edits.deinit();
-    try erase(&tree, token_cursor.TokenCursor.init(source, tree.tokens), &edits);
+    try erase(&tree, token_index.TokenIndex.init(source, tree.tokens), &edits);
 
     const output = try edits.render();
     defer allocator.free(output);
@@ -1579,7 +1578,7 @@ test "eraser removes type-only import and export list items" {
 
     var edits = fixed_edit_buffer.FixedEditBuffer.init(allocator, source);
     defer edits.deinit();
-    try erase(&tree, token_cursor.TokenCursor.init(source, tree.tokens), &edits);
+    try erase(&tree, token_index.TokenIndex.init(source, tree.tokens), &edits);
 
     const output = try edits.render();
     defer allocator.free(output);
@@ -1609,7 +1608,7 @@ test "eraser removes expression-level TypeScript wrappers" {
 
     var edits = fixed_edit_buffer.FixedEditBuffer.init(allocator, source);
     defer edits.deinit();
-    try erase(&tree, token_cursor.TokenCursor.init(source, tree.tokens), &edits);
+    try erase(&tree, token_index.TokenIndex.init(source, tree.tokens), &edits);
 
     const output = try edits.render();
     defer allocator.free(output);
@@ -1634,7 +1633,7 @@ test "suffix assertions preserve ASI boundaries" {
 
     var edits = fixed_edit_buffer.FixedEditBuffer.init(allocator, source);
     defer edits.deinit();
-    try erase(&tree, token_cursor.TokenCursor.init(source, tree.tokens), &edits);
+    try erase(&tree, token_index.TokenIndex.init(source, tree.tokens), &edits);
 
     const output = try edits.render();
     defer allocator.free(output);
@@ -1657,7 +1656,7 @@ test "suffix assertions retain grouping on the left of exponentiation" {
 
     var edits = fixed_edit_buffer.FixedEditBuffer.init(allocator, source);
     defer edits.deinit();
-    try erase(&tree, token_cursor.TokenCursor.init(source, tree.tokens), &edits);
+    try erase(&tree, token_index.TokenIndex.init(source, tree.tokens), &edits);
 
     const output = try edits.render();
     defer allocator.free(output);
@@ -1688,7 +1687,7 @@ test "multiline arrow corrections remain valid JavaScript" {
 
     var edits = fixed_edit_buffer.FixedEditBuffer.init(allocator, source);
     defer edits.deinit();
-    try erase(&tree, token_cursor.TokenCursor.init(source, tree.tokens), &edits);
+    try erase(&tree, token_index.TokenIndex.init(source, tree.tokens), &edits);
 
     const output = try edits.render();
     defer allocator.free(output);
@@ -1721,7 +1720,7 @@ fn expect_strip(
 
     var edits = fixed_edit_buffer.FixedEditBuffer.init(allocator, original);
     defer edits.deinit();
-    try erase(&tree, token_cursor.TokenCursor.init(original, tree.tokens), &edits);
+    try erase(&tree, token_index.TokenIndex.init(original, tree.tokens), &edits);
 
     const output = try edits.render();
     defer allocator.free(output);
@@ -2049,6 +2048,14 @@ test "strip: asi.suffix_assertion_before_template_statement" {
         .ts,
         "value as Type\n`next`;",
         "value;       \n`next`;",
+    );
+}
+
+test "strip: asi.suffix_assertion_before_interpolated_template_statement" {
+    try expect_strip(
+        .ts,
+        "value as Type\n`next${item}`;",
+        "value;       \n`next${item}`;",
     );
 }
 
@@ -2441,6 +2448,15 @@ test "strip: classes.decorator_named_readonly_does_not_hide_field_modifier" {
         .ts,
         "class C { @readonly readonly value = 1; }",
         "class C { @readonly          value = 1; }",
+    );
+}
+
+test "strip: classes.combined_modifiers_preserve_decorators_comments_and_keyword_keys" {
+    try expect_strip(
+        .ts,
+        "class C { @readonly public /* keep override */ override readonly readonly!: T; }",
+        "class C { @readonly " ++ "      " ++ " /* keep override */ " ++
+            "                  " ++ "readonly    ; }",
     );
 }
 

@@ -18,7 +18,7 @@ pub fn init_edits(allocator: Allocator, file: *const ParsedSource) Edits {
 }
 
 pub fn erase(file: *ParsedSource, edits: *Edits) Allocator.Error!void {
-    try type_eraser.erase(&file.tree, file.token_cursor(), edits);
+    try type_eraser.erase(&file.tree, file.token_index(), edits);
 }
 
 pub fn seal(edits: *Edits) Allocator.Error!Plan {
