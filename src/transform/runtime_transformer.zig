@@ -38,6 +38,7 @@ const NamespaceCaptureFrame = struct {
 pub const RuntimeFeatureCollection = struct {
     allocator: Allocator,
     names: RuntimeNameAllocator,
+    declaration_plans: declarations.Declarations,
     enums: std.ArrayList(NodeIndex) = .empty,
     type_assertions: std.ArrayList(NodeIndex) = .empty,
     enum_references: enum_lowering.ReferenceMap = .empty,
@@ -59,11 +60,13 @@ pub const RuntimeFeatureCollection = struct {
         return .{
             .allocator = allocator,
             .names = RuntimeNameAllocator.init(allocator),
+            .declaration_plans = declarations.Declarations.init(allocator),
             .collect_jsx = collect_jsx,
         };
     }
 
     pub fn deinit(self: *RuntimeFeatureCollection) void {
+        self.declaration_plans.deinit();
         self.enums.deinit(self.allocator);
         self.type_assertions.deinit(self.allocator);
         enum_lowering.deinit_reference_map(&self.enum_references, self.allocator);
@@ -133,6 +136,7 @@ pub const RuntimeFeatureCollection = struct {
             .ts_enum_declaration => |declaration| {
                 if (declaration.declare) return;
                 if (self.enum_member_stack.items.len > 0) self.enum_has_nested_scopes = true;
+                try self.declaration_plans.collect_node(data, index, ctx);
                 try self.enums.append(self.allocator, index);
             },
             .ts_import_equals_declaration => |declaration| {
@@ -186,6 +190,7 @@ pub const RuntimeFeatureCollection = struct {
                 });
             },
             .function, .arrow_function_expression, .class, .ts_module_declaration => {
+                try self.declaration_plans.collect_node(data, index, ctx);
                 if (self.enum_member_stack.items.len > 0) self.enum_has_nested_scopes = true;
             },
             .export_named_declaration => |wrapper| {
@@ -404,8 +409,7 @@ pub fn lower(
     collection: *RuntimeFeatureCollection,
     jsx: jsx_config.Config,
 ) Allocator.Error!void {
-    var declaration_plans = declarations.Declarations.init(allocator);
-    defer declaration_plans.deinit();
+    const declaration_plans = &collection.declaration_plans;
     if (collection.enums.items.len > 0 or collection.namespaces.items.len > 0) {
         try declaration_plans.collect(&file.tree);
         var plans = declaration_plans.plans.valueIterator();
@@ -419,7 +423,7 @@ pub fn lower(
             }
         }
     }
-    var enum_semantics = enum_analysis.Analysis.init(allocator, &file.tree, &declaration_plans);
+    var enum_semantics = enum_analysis.Analysis.init(allocator, &file.tree, declaration_plans);
     defer enum_semantics.deinit();
     try enum_semantics.collect(collection.enums.items, &collection.enum_references, collection.enum_has_nested_scopes);
     const lower_jsx = jsx.lowers_jsx() and collection.jsx_roots.items.len > 0;

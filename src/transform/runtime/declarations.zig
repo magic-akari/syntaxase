@@ -18,6 +18,7 @@ pub const Plan = struct {
 
 pub const Declarations = struct {
     allocator: Allocator,
+    sites: std.ArrayList(Site) = .empty,
     scopes: std.AutoHashMapUnmanaged(u32, std.StringHashMapUnmanaged(NodeIndex)) = .empty,
     plans: std.AutoHashMapUnmanaged(u32, Plan) = .empty,
 
@@ -26,52 +27,50 @@ pub const Declarations = struct {
     }
 
     pub fn deinit(self: *Declarations) void {
+        self.sites.deinit(self.allocator);
         var scopes = self.scopes.valueIterator();
         while (scopes.next()) |scope| scope.deinit(self.allocator);
         self.scopes.deinit(self.allocator);
         self.plans.deinit(self.allocator);
     }
 
+    const Site = struct { index: NodeIndex, id: NodeIndex, scope: NodeIndex, export_wrapper: NodeIndex };
+
+    /// Capture declaration context during the eraser's existing traversal.
+    pub fn collect_node(self: *Declarations, data: parser.ast.NodeData, index: NodeIndex, ctx: *const Ctx) Allocator.Error!void {
+        const id: NodeIndex = switch (data) {
+            .ts_enum_declaration => |node| if (node.declare) return else node.id,
+            .ts_module_declaration => |node| if (namespace_semantics.is_type_only_module(ctx.tree, node)) return else node.id,
+            .class => |node| if (!node.declare and node.type == .class_declaration) node.id else return,
+            .function => |node| if (!node.declare and node.type == .function_declaration) node.id else return,
+            else => return,
+        };
+        if (id == .null) return;
+        const parent = ctx.path.parent() orelse .null;
+        const wrapper = if (parent != .null and ctx.tree.data(parent) == .export_named_declaration) parent else .null;
+        try self.sites.append(self.allocator, .{ .index = index, .id = id, .scope = declaration_scope(ctx), .export_wrapper = wrapper });
+    }
+
     pub fn collect(self: *Declarations, tree: *const parser.ast.Tree) Allocator.Error!void {
-        var visitor = Visitor{ .declarations = self };
-        try parser.traverser.basic.traverse(Visitor, tree, &visitor);
+        for (self.sites.items) |site| {
+            const name = identifier_name(tree, root_name(tree, site.id));
+            const scopes = try self.scopes.getOrPut(self.allocator, @intFromEnum(site.scope));
+            if (!scopes.found_existing) scopes.value_ptr.* = .empty;
+            const entry = try scopes.value_ptr.getOrPut(self.allocator, name);
+            if (!entry.found_existing) entry.value_ptr.* = site.index;
+            try self.plans.put(self.allocator, @intFromEnum(site.index), .{
+                .binding = entry.value_ptr.*,
+                .scope = site.scope,
+                .declare_binding = !entry.found_existing,
+                .top_level = site.scope == tree.root,
+                .export_wrapper = site.export_wrapper,
+            });
+        }
     }
 
     pub fn get(self: *const Declarations, index: NodeIndex) Plan {
         return self.plans.get(@intFromEnum(index)).?;
     }
-
-    const Visitor = struct {
-        declarations: *Declarations,
-
-        pub fn enter_node(self: *Visitor, data: parser.ast.NodeData, index: NodeIndex, ctx: *Ctx) Allocator.Error!parser.traverser.Action {
-            const id: NodeIndex = switch (data) {
-                .ts_enum_declaration => |node| if (node.declare) return .skip else node.id,
-                .ts_module_declaration => |node| if (namespace_semantics.is_type_only_module(ctx.tree, node)) return .skip else node.id,
-                .class => |node| if (!node.declare and node.type == .class_declaration) node.id else return .proceed,
-                .function => |node| if (!node.declare and node.type == .function_declaration) node.id else return .proceed,
-                .ts_type_annotation, .ts_interface_declaration, .ts_type_alias_declaration => return .skip,
-                else => return .proceed,
-            };
-            if (id == .null) return .proceed;
-            const name = identifier_name(ctx.tree, root_name(ctx.tree, id));
-            const scope = declaration_scope(ctx);
-            const scopes = try self.declarations.scopes.getOrPut(self.declarations.allocator, @intFromEnum(scope));
-            if (!scopes.found_existing) scopes.value_ptr.* = .empty;
-            const entry = try scopes.value_ptr.getOrPut(self.declarations.allocator, name);
-            if (!entry.found_existing) entry.value_ptr.* = index;
-            const parent = ctx.path.parent() orelse .null;
-            const export_wrapper = if (parent != .null and ctx.tree.data(parent) == .export_named_declaration) parent else .null;
-            try self.declarations.plans.put(self.declarations.allocator, @intFromEnum(index), .{
-                .binding = entry.value_ptr.*,
-                .scope = scope,
-                .declare_binding = !entry.found_existing,
-                .top_level = scope == ctx.tree.root,
-                .export_wrapper = export_wrapper,
-            });
-            return .proceed;
-        }
-    };
 };
 
 fn declaration_scope(ctx: *const Ctx) NodeIndex {
