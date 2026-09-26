@@ -299,7 +299,7 @@ pub const Emitter = struct {
             if (key) |key_fragment| {
                 try result.append_fragment(key_fragment);
             } else {
-                try result.append_generated("undefined");
+                try result.append_generated("void 0");
             }
             try append_fmt(&result, ", {s})", .{if (static_children) "true" else "false"});
             return result;
@@ -446,7 +446,7 @@ pub const Emitter = struct {
             },
             .jsx_expression_container => |container| {
                 if (self.file.tree.data(container.expression) == .jsx_empty_expression) {
-                    return generated_fragment(self.allocator, "undefined");
+                    return generated_fragment(self.allocator, "void 0");
                 }
                 const span = self.file.tree.span(value_index);
                 const expression_span = self.file.tree.span(container.expression);
@@ -487,17 +487,14 @@ pub const Emitter = struct {
         for (self.file.tree.extra(range)) |child_index| {
             switch (self.file.tree.data(child_index)) {
                 .jsx_text => |text| {
-                    const decoded = try jsx_entities.decode(
-                        self.allocator,
-                        self.file.tree.string(text.value),
-                    );
-                    defer self.allocator.free(decoded);
-                    const cleaned = try clean_text(self.allocator, decoded);
+                    const cleaned = try clean_text(self.allocator, self.file.tree.string(text.value));
                     defer self.allocator.free(cleaned);
                     if (cleaned.len == 0) continue;
+                    const decoded = try jsx_entities.decode(self.allocator, cleaned);
+                    defer self.allocator.free(decoded);
                     var content = RuntimeFragment.init(self.allocator);
                     errdefer content.deinit();
-                    try append_string_literal(&content, cleaned);
+                    try append_string_literal(&content, decoded);
                     try result.values.append(self.allocator, .{
                         .content = content,
                         .is_spread = false,

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import vm from "node:vm";
 
 export function runApiTests({ stripTypes, transform }, label) {
 	assert.equal(transform(""), "");
@@ -27,8 +28,8 @@ export function runApiTests({ stripTypes, transform }, label) {
 			},
 		}),
 		'const element = _jsxDEV("div", {"children": ' +
-			"[_jsxDEV(A, {}, undefined, false), _jsxDEV(B, {}, undefined, false)]}, " +
-			"undefined, true);\n" +
+			"[_jsxDEV(A, {}, void 0, false), _jsxDEV(B, {}, void 0, false)]}, " +
+			"void 0, true);\n" +
 			'import { jsxDEV as _jsxDEV } from "preact/jsx-dev-runtime";\n',
 	);
 	assert.equal(
@@ -41,6 +42,23 @@ export function runApiTests({ stripTypes, transform }, label) {
 		transform("const element = <div />;\n", { jsx: { runtime: "preserve" } }),
 		"const element = <div />;\n",
 	);
+
+	const classic = { jsx: { runtime: "classic" } };
+	const React = { createElement: (_tag, _props, ...children) => children };
+	for (const [source, expected] of [
+		["<div>a&#10;b</div>", ["a\nb"]],
+		["<div>&#32;&#10;&#32;</div>", [" \n "]],
+		["<div>\n  first\n  second\n</div>", ["first second"]],
+		["<div>&#9;&#13;{42}&#32;</div>", ["\t\r", 42, " "]],
+	]) {
+		const actual = vm.runInNewContext(transform(source, classic), { React });
+		assert.deepEqual(actual, expected);
+	}
+	const devCode = transform("function f(undefined: any) { return <div />; } f(123);", {
+		jsx: { runtime: "automatic", development: true },
+	});
+	const devExecutable = devCode.replace(/^import .* from "react\/jsx-dev-runtime";\n?/m, "");
+	assert.equal(vm.runInNewContext(devExecutable, { _jsxDEV: (_tag, _props, key) => key }), undefined);
 
 	const largeSource = "const value: number = 1;\n".repeat(5_000);
 	const largeOutput = "const value         = 1;\n".repeat(5_000);
