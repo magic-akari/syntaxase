@@ -60,6 +60,43 @@ export function runApiTests({ stripTypes, transform }, label) {
 	const devExecutable = devCode.replace(/^import .* from "react\/jsx-dev-runtime";\n?/m, "");
 	assert.equal(vm.runInNewContext(devExecutable, { _jsxDEV: (_tag, _props, key) => key }), undefined);
 
+	for (const [source, expected] of [
+		["function f(){return <number>\n42;} f();", 42],
+		["try {throw <number>\n42;} catch(e) {e;}", 42],
+		["const f=()=> <any>{value:1}; f().value;", 1],
+		["<any>function() {};", undefined],
+		["const f=()=> <any><any>{value:2}; f().value;", 2],
+		["enum E {A=<number>1} E.A;", 1],
+		["const C=<any>class {constructor(public value:number){}}; new C(3).value;", 3],
+		["function f(){return <number> /* comment */\r\n42;} f();", 42],
+	]) {
+		const actual = vm.runInNewContext(transform(source));
+		if (expected === undefined) assert.equal(typeof actual, "function", source);
+		else assert.equal(actual, expected, source);
+	}
+
+	for (const source of [
+		"const x = <number>3;",
+		"const x = <number>\n3;",
+		"const x = <any>{value:1};",
+		"function f(){return <number>3;}",
+		"const f=()=> <number>3;",
+		"const x=(<number>\n3);",
+	]) {
+		assert.equal(transform(source), stripTypes(source), source);
+	}
+	for (const [source, expected] of [
+		["function f(){return <any><number>\n42;} f();", 42],
+		["function f(){return <number>\n40+2;} f();", 42],
+		["function* f(){yield <number>\n42;} f().next().value;", 42],
+		["const f=()=> <any>{value:2}.value; f();", 2],
+		["<any>function(){return 3;}();", 3],
+		["<any>class {};", "function"],
+	]) {
+		const actual = vm.runInNewContext(transform(source));
+		assert.equal(expected === "function" ? typeof actual : actual, expected, source);
+	}
+
 	const largeSource = "const value: number = 1;\n".repeat(5_000);
 	const largeOutput = "const value         = 1;\n".repeat(5_000);
 	for (let index = 0; index < 8; index += 1) {
