@@ -1,7 +1,7 @@
 const N1 = 2;
 
 var       N;(function(N2){
-	       var       N;(function(N){
+	       let       N;(function(N){
 		       function inner()    {
 			return 1;
 		}N.inner=inner;
