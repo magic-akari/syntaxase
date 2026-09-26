@@ -97,6 +97,24 @@ export function runApiTests({ stripTypes, transform }, label) {
 		assert.equal(expected === "function" ? typeof actual : actual, expected, source);
 	}
 
+	for (const [source, expected] of [
+		["let E = 7; { enum E { A = 1 } } E;", 7],
+		[
+			"const values: any[] = []; for (let i = 0; i < 2; i++) { enum E { A = i } values.push(E); } [values[0] === values[1], values[0].A, values[1].A];",
+			[false, 0, 1],
+		],
+		["{ enum E { A = 1 } enum E { B = 2 } [E.A, E.B]; }", [1, 2]],
+		["enum E { A = 1 } { enum E { A = 2 } } E.A;", 1],
+		["class C {} namespace C { export function f() { return 1; } } C.f();", 1],
+		["function C() {} namespace C { export function f() { return 2; } } C.f();", 2],
+		["enum E { A = 1 } namespace E { export function f() { return E.A; } } E.f();", 1],
+		["namespace N { export class C {} export namespace C { export function f() { return 3; } } } N.C.f();", 3],
+		["function f() { enum E { A = 1 } enum E { B = 2 } return E; } f() === f();", false],
+	]) {
+		const actual = vm.runInNewContext(transform(source));
+		assert.equal(JSON.stringify(actual), JSON.stringify(expected), source);
+	}
+
 	const largeSource = "const value: number = 1;\n".repeat(5_000);
 	const largeOutput = "const value         = 1;\n".repeat(5_000);
 	for (let index = 0; index < 8; index += 1) {

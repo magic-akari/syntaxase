@@ -1,4 +1,5 @@
 const std = @import("std");
+const declarations = @import("declarations.zig");
 const parser = @import("parser");
 const fixed_edit_buffer = @import("../fixed_edit_buffer.zig");
 const runtime_edit_buffer = @import("../runtime_edit_buffer.zig");
@@ -70,7 +71,7 @@ pub const Lowerer = struct {
         }
     }
 
-    pub fn lower_declaration(self: *Lowerer, task: DeclarationTask) Allocator.Error!void {
+    pub fn lower_declaration(self: *Lowerer, task: DeclarationTask, declaration_plan: declarations.Plan) Allocator.Error!void {
         const declaration = switch (self.file.tree.data(task.index)) {
             .ts_module_declaration => |value| value,
             else => unreachable,
@@ -87,13 +88,13 @@ pub const Lowerer = struct {
 
         var header: std.ArrayList(u8) = .empty;
         errdefer header.deinit(self.allocator);
-        try header.appendSlice(self.allocator, "var");
-        try unicode.append_blanked(
-            &header,
-            self.allocator,
-            self.file.source()[declaration_span.start + 3 .. id_span.start],
-        );
-        try self.fixed.append_range(&header, id_span.start, id_span.end);
+        if (declaration_plan.declare_binding) {
+            try header.appendSlice(self.allocator, if (declaration_plan.top_level) "var" else "let");
+            try unicode.append_blanked(&header, self.allocator, self.file.source()[declaration_span.start + 3 .. id_span.start]);
+            try self.fixed.append_range(&header, id_span.start, id_span.end);
+        } else {
+            try unicode.append_blanked(&header, self.allocator, self.file.source()[declaration_span.start..id_span.end]);
+        }
         try header.appendSlice(self.allocator, ";(function(");
         try header.appendSlice(self.allocator, namespace_binding.receiver_name);
         try header.appendSlice(self.allocator, "){");

@@ -1,4 +1,5 @@
 const std = @import("std");
+const declarations = @import("declarations.zig");
 const parser = @import("parser");
 const yuku_util = @import("yuku_util");
 const fixed_edit_buffer = @import("../fixed_edit_buffer.zig");
@@ -98,6 +99,7 @@ pub fn emit(
     names: *RuntimeNameAllocator,
     references_by_member: *const ReferenceMap,
     index: NodeIndex,
+    declaration_plan: declarations.Plan,
 ) Allocator.Error!Emission {
     const declaration = switch (file.tree.data(index)) {
         .ts_enum_declaration => |value| value,
@@ -164,9 +166,13 @@ pub fn emit(
     defer identifier_replacements.deinit(allocator);
     try writer.claim_initial_line(file.tree.span(index).start);
 
-    try writer.append("var");
-    try writer.append_blanked(file.source()[file.tree.span(index).start + 3 .. id_span.start]);
-    try writer.append_fixed(fixed, id_span.start, id_span.end);
+    if (declaration_plan.declare_binding) {
+        try writer.append(if (declaration_plan.top_level) "var" else "let");
+        try writer.append_blanked(file.source()[file.tree.span(index).start + 3 .. id_span.start]);
+        try writer.append_fixed(fixed, id_span.start, id_span.end);
+    } else {
+        try writer.append_blanked(file.source()[file.tree.span(index).start..id_span.end]);
+    }
     try writer.append(";(function(");
     try writer.append(receiver);
     try writer.append("){");

@@ -50,7 +50,6 @@ fn erase_internal(
         .tokens = tokens,
         .runtime = runtime,
     };
-    defer visitor.exported_enums.deinit(edits.allocator);
     try parser.traverser.basic.traverse(Visitor, tree, &visitor);
 }
 
@@ -58,7 +57,6 @@ const Visitor = struct {
     edits: *fixed_edit_buffer.FixedEditBuffer,
     tokens: token_index.TokenIndex,
     runtime: ?*runtime_transformer.RuntimeFeatureCollection,
-    exported_enums: std.StringHashMapUnmanaged(void) = .empty,
     statement_cursors: [256]StatementListCursor = undefined,
     initialized_statement_cursors: std.StaticBitSet(256) = .empty,
 
@@ -505,27 +503,6 @@ const Visitor = struct {
                 const declaration_span = ctx.tree.span(inner);
                 if (self.tokens.find_first(.{ .start = wrapper_span.start, .end = declaration_span.start }, .@"export")) |token| {
                     try self.edits.add_blank(token.span.start, token.span.end);
-                }
-            } else {
-                const enum_declaration = switch (ctx.tree.data(inner)) {
-                    .ts_enum_declaration => |value| value,
-                    else => null,
-                };
-                if (enum_declaration) |value| {
-                    if (!value.declare) {
-                        const name = switch (ctx.tree.data(value.id)) {
-                            .binding_identifier => |identifier| ctx.tree.string(identifier.name),
-                            else => ctx.tree.source[ctx.tree.span(value.id).start..ctx.tree.span(value.id).end],
-                        };
-                        const entry = try self.exported_enums.getOrPut(self.edits.allocator, name);
-                        if (entry.found_existing) {
-                            const wrapper_span = ctx.tree.span(index);
-                            const enum_span = ctx.tree.span(inner);
-                            if (self.tokens.find_first(.{ .start = wrapper_span.start, .end = enum_span.start }, .@"export")) |token| {
-                                try self.edits.add_blank(token.span.start, token.span.end);
-                            }
-                        }
-                    }
                 }
             }
         }

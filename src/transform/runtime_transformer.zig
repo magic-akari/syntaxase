@@ -1,4 +1,5 @@
 const std = @import("std");
+const declarations = @import("runtime/declarations.zig");
 const parser = @import("parser");
 const fixed_edit_buffer = @import("fixed_edit_buffer.zig");
 const enum_lowering = @import("runtime/enum.zig");
@@ -392,6 +393,21 @@ pub fn lower(
     collection: *RuntimeFeatureCollection,
     jsx: jsx_config.Config,
 ) Allocator.Error!void {
+    var declaration_plans = declarations.Declarations.init(allocator);
+    defer declaration_plans.deinit();
+    if (collection.enums.items.len > 0 or collection.namespaces.items.len > 0) {
+        try declaration_plans.collect(&file.tree);
+        var plans = declaration_plans.plans.valueIterator();
+        while (plans.next()) |plan| {
+            if (plan.declare_binding or !plan.top_level or plan.export_wrapper == .null) continue;
+            const wrapper = file.tree.data(plan.export_wrapper).export_named_declaration;
+            const span = file.tree.span(plan.export_wrapper);
+            const inner = file.tree.span(wrapper.declaration);
+            if (file.token_index().find_first(.{ .start = span.start, .end = inner.start }, .@"export")) |token| {
+                try edits.add_replacement(token.span.start, token.span.end, "      ");
+            }
+        }
+    }
     const lower_jsx = jsx.lowers_jsx() and collection.jsx_roots.items.len > 0;
     var emitter: jsx_emitter.Emitter = undefined;
     if (lower_jsx) {
@@ -416,7 +432,7 @@ pub fn lower(
     defer namespace_lowerer.deinit();
     try namespace_lowerer.register_declarations(collection.namespaces.items);
     for (collection.namespaces.items) |task| {
-        try namespace_lowerer.lower_declaration(task);
+        try namespace_lowerer.lower_declaration(task, declaration_plans.get(task.index));
     }
     for (collection.enums.items) |index| {
         var emission = try enum_lowering.emit(
@@ -426,6 +442,7 @@ pub fn lower(
             &collection.names,
             &collection.enum_references,
             index,
+            declaration_plans.get(index),
         );
         defer allocator.free(emission.identifier_replacements);
         const span = file.tree.span(index);

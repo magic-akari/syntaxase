@@ -668,7 +668,7 @@ test "namespace lowering composes exported enum and parameter properties" {
 
     try std.testing.expectEqualStrings(
         "var       N;(function(N){        " ++
-            "var  E;(function(E){const A = 0;E[E[\"A\"]=A]=\"A\";})(E||(E={}));N.E=E;        " ++
+            "let  E;(function(E){const A = 0;E[E[\"A\"]=A]=\"A\";})(E||(E={}));N.E=E;        " ++
             "class Box {value; constructor(       value        ) {;this.value=value;} }N.Box=Box; " ++
             "})(N||(N={}));\n",
         result.code,
@@ -683,7 +683,7 @@ test "repeated exported enums keep only the first export" {
 
     try std.testing.expectEqualStrings(
         "export var  E;(function(E){const A = 0;E[E[\"A\"]=A]=\"A\";})(E||(E={}));\n" ++
-            "       var  E;(function(E){const B = 0;E[E[\"B\"]=B]=\"B\";})(E||(E={}));\n",
+            "             ;(function(E){const B = 0;E[E[\"B\"]=B]=\"B\";})(E||(E={}));\n",
         result.code,
     );
 }
