@@ -32,7 +32,7 @@ jobs:
                   version: 2026.9.1
             - uses: actions-rust-lang/setup-rust-toolchain@dc354b3df5a8e4db0bff5361fa176da74fcf3151 # v1
               with:
-                  toolchain: 1.98.0
+                  toolchain: 1.98.1
                   cache: false
             - name: Install Gungraun and Valgrind
               uses: gungraun/setup-gungraun@62591572561bb2f4ed2ae300b8a8bea99ea8ddaf # v1
