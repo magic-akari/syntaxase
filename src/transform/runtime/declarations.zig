@@ -54,10 +54,7 @@ pub const Declarations = struct {
                 else => return .proceed,
             };
             if (id == .null) return .proceed;
-            const name = switch (ctx.tree.data(id)) {
-                .binding_identifier => |node| ctx.tree.string(node.name),
-                else => ctx.tree.source[ctx.tree.span(id).start..ctx.tree.span(id).end],
-            };
+            const name = identifier_name(ctx.tree, root_name(ctx.tree, id));
             const scope = declaration_scope(ctx);
             const scopes = try self.declarations.scopes.getOrPut(self.declarations.allocator, @intFromEnum(scope));
             if (!scopes.found_existing) scopes.value_ptr.* = .empty;
@@ -93,4 +90,19 @@ fn declaration_scope(ctx: *const Ctx) NodeIndex {
         }
     }
     return ctx.tree.root;
+}
+
+pub fn root_name(tree: *const parser.ast.Tree, index: NodeIndex) NodeIndex {
+    var current = index;
+    while (tree.data(current) == .ts_qualified_name) current = tree.data(current).ts_qualified_name.left;
+    return current;
+}
+
+pub fn identifier_name(tree: *const parser.ast.Tree, index: NodeIndex) []const u8 {
+    return switch (tree.data(index)) {
+        .binding_identifier => |node| tree.string(node.name),
+        .identifier_reference => |node| tree.string(node.name),
+        .identifier_name => |node| tree.string(node.name),
+        else => tree.source[tree.span(index).start..tree.span(index).end],
+    };
 }

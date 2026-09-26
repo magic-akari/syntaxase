@@ -289,10 +289,11 @@ pub const RuntimeFeatureCollection = struct {
             .export_owner = if (wrapped_export) nearest_runtime_namespace(ctx) else .null,
         });
         self.capture_barrier_depth += 1;
-        const public_name = switch (ctx.tree.data(declaration.id)) {
-            .binding_identifier => |identifier| ctx.tree.string(identifier.name),
-            else => ctx.tree.source[ctx.tree.span(declaration.id).start..ctx.tree.span(declaration.id).end],
+        const body_name = switch (ctx.tree.data(declaration.id)) {
+            .ts_qualified_name => |qualified| qualified.right,
+            else => declaration.id,
         };
+        const public_name = declarations.identifier_name(ctx.tree, body_name);
         try self.namespace_capture_stack.append(self.allocator, .{
             .task_index = task_index,
             .barrier_depth = self.capture_barrier_depth,

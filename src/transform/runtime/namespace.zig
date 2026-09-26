@@ -37,7 +37,7 @@ pub const Lowerer = struct {
     fixed: *const FixedEditPlan,
     edits: *RuntimeEditBuffer,
     names: *RuntimeNameAllocator,
-    bindings: std.AutoHashMapUnmanaged(u32, Binding) = .empty,
+    bindings: std.AutoHashMapUnmanaged(u32, []Binding) = .empty,
     capture_risks: std.AutoHashMapUnmanaged(u32, bool) = .empty,
 
     pub fn init(
@@ -57,6 +57,8 @@ pub const Lowerer = struct {
     }
 
     pub fn deinit(self: *Lowerer) void {
+        var bindings = self.bindings.valueIterator();
+        while (bindings.next()) |chain| self.allocator.free(chain.*);
         self.bindings.deinit(self.allocator);
         self.capture_risks.deinit(self.allocator);
     }
@@ -81,7 +83,8 @@ pub const Lowerer = struct {
             .ts_module_block => declaration.body,
             else => return,
         };
-        const namespace_binding = try self.resolve_binding(task.index);
+        const chain = try self.resolve_chain(task.index);
+        const namespace_binding = chain[0];
         const declaration_span = self.file.tree.span(task.index);
         const id_span = self.file.tree.span(declaration.id);
         const body_span = self.file.tree.span(body);
@@ -91,13 +94,21 @@ pub const Lowerer = struct {
         if (declaration_plan.declare_binding) {
             try header.appendSlice(self.allocator, if (declaration_plan.top_level) "var" else "let");
             try unicode.append_blanked(&header, self.allocator, self.file.source()[declaration_span.start + 3 .. id_span.start]);
-            try self.fixed.append_range(&header, id_span.start, id_span.end);
+            const root_span = self.file.tree.span(declarations.root_name(&self.file.tree, declaration.id));
+            try self.fixed.append_range(&header, root_span.start, root_span.end);
         } else {
             try unicode.append_blanked(&header, self.allocator, self.file.source()[declaration_span.start..id_span.end]);
         }
         try header.appendSlice(self.allocator, ";(function(");
         try header.appendSlice(self.allocator, namespace_binding.receiver_name);
         try header.appendSlice(self.allocator, "){");
+        for (chain[1..]) |child| {
+            try header.appendSlice(self.allocator, "let ");
+            try header.appendSlice(self.allocator, child.public_name);
+            try header.appendSlice(self.allocator, ";(function(");
+            try header.appendSlice(self.allocator, child.receiver_name);
+            try header.appendSlice(self.allocator, "){");
+        }
         try self.file.comment_cursor().append_range(
             &header,
             self.allocator,
@@ -116,6 +127,19 @@ pub const Lowerer = struct {
 
         var footer: std.ArrayList(u8) = .empty;
         errdefer footer.deinit(self.allocator);
+        var level = chain.len;
+        while (level > 1) {
+            level -= 1;
+            const child = chain[level];
+            const parent = chain[level - 1];
+            try footer.appendSlice(self.allocator, "})(");
+            try footer.appendSlice(self.allocator, child.public_name);
+            try footer.append(self.allocator, '=');
+            try append_namespace_property(&footer, self.allocator, parent.receiver_name, child.public_name);
+            try footer.appendSlice(self.allocator, "||(");
+            try append_namespace_property(&footer, self.allocator, parent.receiver_name, child.public_name);
+            try footer.appendSlice(self.allocator, "={}));");
+        }
         try footer.appendSlice(self.allocator, "})(");
         if (task.export_owner != .null) {
             const owner = try self.resolve_binding(task.export_owner);
@@ -161,29 +185,36 @@ pub const Lowerer = struct {
     }
 
     fn resolve_binding(self: *Lowerer, index: NodeIndex) Allocator.Error!Binding {
+        const chain = try self.resolve_chain(index);
+        return chain[chain.len - 1];
+    }
+
+    fn resolve_chain(self: *Lowerer, index: NodeIndex) Allocator.Error![]const Binding {
         const key = @intFromEnum(index);
         if (self.bindings.get(key)) |existing| return existing;
-        const declaration = switch (self.file.tree.data(index)) {
-            .ts_module_declaration => |value| value,
-            else => unreachable,
-        };
-        const public_name = switch (self.file.tree.data(declaration.id)) {
-            .binding_identifier => |identifier| self.file.tree.string(identifier.name),
-            else => self.file.source()[self.file.tree.span(declaration.id).start..self.file.tree.span(declaration.id).end],
-        };
-
-        var unavailable: std.StringHashMapUnmanaged(void) = .empty;
-        defer unavailable.deinit(self.allocator);
-        if (self.capture_risks.get(key) orelse false) {
-            try unavailable.put(self.allocator, public_name, {});
+        const declaration = self.file.tree.data(index).ts_module_declaration;
+        var parts: std.ArrayList(NodeIndex) = .empty;
+        defer parts.deinit(self.allocator);
+        try append_name_parts(&parts, self.allocator, &self.file.tree, declaration.id);
+        const chain = try self.allocator.alloc(Binding, parts.items.len);
+        errdefer self.allocator.free(chain);
+        for (parts.items, 0..) |part, position| {
+            const public_name = declarations.identifier_name(&self.file.tree, part);
+            var unavailable: std.StringHashMapUnmanaged(void) = .empty;
+            defer unavailable.deinit(self.allocator);
+            if (position + 1 < parts.items.len) {
+                const next_name = declarations.identifier_name(&self.file.tree, parts.items[position + 1]);
+                try unavailable.put(self.allocator, next_name, {});
+            } else if (self.capture_risks.get(key) orelse false) {
+                try unavailable.put(self.allocator, public_name, {});
+            }
+            chain[position] = .{
+                .public_name = public_name,
+                .receiver_name = try self.names.claim_receiver(public_name, &unavailable),
+            };
         }
-        const receiver_name = try self.names.claim_receiver(public_name, &unavailable);
-        const result: Binding = .{
-            .public_name = public_name,
-            .receiver_name = receiver_name,
-        };
-        try self.bindings.put(self.allocator, key, result);
-        return result;
+        try self.bindings.put(self.allocator, key, chain);
+        return chain;
     }
 };
 
@@ -205,4 +236,14 @@ fn declaration_identifier(tree: *const parser.ast.Tree, index: NodeIndex) ?NodeI
         .ts_enum_declaration => |node| node.id,
         else => null,
     };
+}
+
+fn append_name_parts(parts: *std.ArrayList(NodeIndex), allocator: Allocator, tree: *const parser.ast.Tree, index: NodeIndex) Allocator.Error!void {
+    switch (tree.data(index)) {
+        .ts_qualified_name => |qualified| {
+            try append_name_parts(parts, allocator, tree, qualified.left);
+            try parts.append(allocator, qualified.right);
+        },
+        else => try parts.append(allocator, index),
+    }
 }
