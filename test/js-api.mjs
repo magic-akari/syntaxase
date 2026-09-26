@@ -115,6 +115,25 @@ export function runApiTests({ stripTypes, transform }, label) {
 		assert.equal(JSON.stringify(actual), JSON.stringify(expected), source);
 	}
 
+	for (const [source, expected] of [
+		["namespace A.B { export function f() { return 1; } } A.B.f();", 1],
+		["namespace A.B.C { export function f() { return 2; } } A.B.C.f();", 2],
+		[
+			"namespace A.B { export function f() { return 1; } } namespace A.B { export function g() { return 2; } } [A.B.f(), A.B.g()];",
+			[1, 2],
+		],
+		[
+			"namespace A.B { export function f() { return 1; } } namespace A { export namespace B { export function g() { return 2; } } } [A.B.f(), A.B.g()];",
+			[1, 2],
+		],
+		["namespace N { export namespace A.B { export function f() { return 3; } } } N.A.B.f();", 3],
+		["namespace A.A { export function f() { return 4; } } A.A.f();", 4],
+		["class A {} namespace A.B { export function f() { return 5; } } A.B.f();", 5],
+		["namespace A.B { export class B {} } typeof A.B.B;", "function"],
+	]) {
+		assert.equal(JSON.stringify(vm.runInNewContext(transform(source))), JSON.stringify(expected), source);
+	}
+
 	const largeSource = "const value: number = 1;\n".repeat(5_000);
 	const largeOutput = "const value         = 1;\n".repeat(5_000);
 	for (let index = 0; index < 8; index += 1) {
