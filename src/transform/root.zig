@@ -528,8 +528,8 @@ test "development JSX always emits jsxDEV metadata arguments" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings(
-        "const element = _jsxDEV(\"div\", {\"children\": [_jsxDEV(A, {}, undefined, false), " ++
-            "_jsxDEV(B, {}, undefined, false)]}, undefined, true);\n" ++
+        "const element = _jsxDEV(\"div\", {\"children\": [_jsxDEV(A, {}, void 0, false), " ++
+            "_jsxDEV(B, {}, void 0, false)]}, void 0, true);\n" ++
             "import { jsxDEV as _jsxDEV } from \"react/jsx-dev-runtime\";\n",
         result.code,
     );
