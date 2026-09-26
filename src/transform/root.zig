@@ -737,7 +737,7 @@ test "enum fragments compose nested parameter-property insertions" {
     try std.testing.expectEqualStrings(
         "var  Outer;(function(Outer){" ++
             "const A=(class {x; constructor(       x        ) {;this.x=x;} });" ++
-            "Outer[Outer[\"A\"]=A]=\"A\";" ++
+            "Outer[\"A\"]=A;if(typeof A!==\"string\")Outer[A]=\"A\";" ++
             "})(Outer||(Outer={}));\n",
         result.code,
     );
