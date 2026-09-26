@@ -11,6 +11,7 @@ const namespace_semantics = @import("namespace_semantics.zig");
 const runtime_edit_buffer = @import("runtime_edit_buffer.zig");
 const runtime_name_allocator = @import("runtime_name_allocator.zig");
 const source_file = @import("source_file.zig");
+const source_layout = @import("source_layout.zig");
 
 const Allocator = std.mem.Allocator;
 const Ctx = parser.traverser.basic.Ctx;
@@ -36,6 +37,7 @@ pub const RuntimeFeatureCollection = struct {
     allocator: Allocator,
     names: RuntimeNameAllocator,
     enums: std.ArrayList(NodeIndex) = .empty,
+    type_assertions: std.ArrayList(NodeIndex) = .empty,
     enum_references: enum_lowering.ReferenceMap = .empty,
     import_equals: std.ArrayList(import_equals_lowering.Task) = .empty,
     parameter_properties: std.ArrayList(parameter_properties_lowering.Task) = .empty,
@@ -60,6 +62,7 @@ pub const RuntimeFeatureCollection = struct {
 
     pub fn deinit(self: *RuntimeFeatureCollection) void {
         self.enums.deinit(self.allocator);
+        self.type_assertions.deinit(self.allocator);
         enum_lowering.deinit_reference_map(&self.enum_references, self.allocator);
         self.import_equals.deinit(self.allocator);
         for (self.parameter_properties.items) |*task| task.super_calls.deinit(self.allocator);
@@ -107,6 +110,9 @@ pub const RuntimeFeatureCollection = struct {
         }
 
         switch (data) {
+            .ts_type_assertion => {
+                if (assertion_needs_parentheses(index, ctx)) try self.type_assertions.append(self.allocator, index);
+            },
             .identifier_reference => {
                 const member = self.enum_member_stack.getLastOrNull() orelse return;
                 const entry = try self.enum_references.getOrPut(
@@ -455,7 +461,76 @@ pub fn lower(
     for (collection.namespace_exports.items) |task| {
         try namespace_lowerer.lower_export(task);
     }
+    for (collection.type_assertions.items) |index| {
+        const span = file.tree.span(index);
+        var fragment = runtime_edit_buffer.RuntimeFragment.init(allocator);
+        errdefer fragment.deinit();
+        // Keep the expression in its original grammatical context even when
+        // erasing the prefix exposes a line break or an object/function literal.
+        try fragment.append_generated("(");
+        try fragment.append_original(span.start, span.end);
+        try fragment.append_generated(")");
+        try edits.add_fragment(span.start, span.end, fragment);
+    }
     if (lower_jsx) try emitter.lower_roots(edits, collection.jsx_roots.items);
+}
+
+// Follow the expression's leading edge to find the first token left after
+// type erasure. Existing parentheses and prefix operators remain boundaries.
+fn assertion_head(tree: *const parser.ast.Tree, initial: NodeIndex) NodeIndex {
+    var current = initial;
+    while (true) {
+        current = switch (tree.data(current)) {
+            .ts_type_assertion => |node| node.expression,
+            .ts_as_expression => |node| node.expression,
+            .ts_satisfies_expression => |node| node.expression,
+            .ts_non_null_expression => |node| node.expression,
+            .ts_instantiation_expression => |node| node.expression,
+            .chain_expression => |node| node.expression,
+            .binary_expression => |node| node.left,
+            .logical_expression => |node| node.left,
+            .assignment_expression => |node| node.left,
+            .conditional_expression => |node| node.@"test",
+            .sequence_expression => |node| tree.extra(node.expressions)[0],
+            .call_expression => |node| node.callee,
+            .member_expression => |node| node.object,
+            .tagged_template_expression => |node| node.tag,
+            .update_expression => |node| if (node.prefix) return current else node.argument,
+            else => return current,
+        };
+    }
+}
+
+fn assertion_needs_parentheses(index: NodeIndex, ctx: *const Ctx) bool {
+    const tree = ctx.tree;
+    const start = tree.span(index).start;
+    const head = assertion_head(tree, index);
+    const data = tree.data(head);
+    const newline = source_layout.contains_line_terminator(tree.source[start..tree.span(head).start]);
+    var depth: usize = 1;
+    while (ctx.path.ancestor(depth)) |parent| : (depth += 1) {
+        const node = tree.data(parent);
+        switch (node) {
+            .return_statement => |value| return value.argument != .null and tree.span(value.argument).start == start and newline,
+            .throw_statement => |value| return tree.span(value.argument).start == start and newline,
+            .yield_expression => |value| return !value.delegate and value.argument != .null and tree.span(value.argument).start == start and newline,
+            .arrow_function_expression => |value| return value.expression and tree.span(value.body).start == start and data == .object_expression,
+            .expression_statement => |value| return tree.span(value.expression).start == start and switch (data) {
+                .object_expression, .function, .class => true,
+                else => false,
+            },
+            .binary_expression => |value| {
+                if (value.operator == .exponent and tree.span(value.left).start == start) {
+                    if (data == .unary_expression or data == .await_expression) return true;
+                }
+            },
+            else => {},
+        }
+        // An enclosing prefix assertion handles its own leading expression;
+        // other tokens before this assertion already establish the context.
+        if (tree.span(parent).start != start) return false;
+    }
+    return false;
 }
 
 fn is_jsx_node(data: parser.ast.NodeData) bool {
