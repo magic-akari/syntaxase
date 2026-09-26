@@ -1,5 +1,6 @@
 const std = @import("std");
 const declarations = @import("declarations.zig");
+const enum_analysis = @import("enum_analysis.zig");
 const parser = @import("parser");
 const yuku_util = @import("yuku_util");
 const fixed_edit_buffer = @import("../fixed_edit_buffer.zig");
@@ -73,10 +74,10 @@ const MemberPlan = struct {
 
 pub const IdentifierReplacement = struct {
     span: parser.ast.Span,
-    text: []const u8,
+    text: []u8,
 };
 
-pub const ReferenceMap = std.AutoHashMapUnmanaged(u32, std.ArrayList(NodeIndex));
+pub const ReferenceMap = enum_analysis.ReferenceMap;
 
 pub fn deinit_reference_map(map: *ReferenceMap, allocator: Allocator) void {
     var iterator = map.valueIterator();
@@ -100,6 +101,7 @@ pub fn emit(
     references_by_member: *const ReferenceMap,
     index: NodeIndex,
     declaration_plan: declarations.Plan,
+    analysis: *enum_analysis.Analysis,
 ) Allocator.Error!Emission {
     const declaration = switch (file.tree.data(index)) {
         .ts_enum_declaration => |value| value,
@@ -129,7 +131,9 @@ pub fn emit(
         }
     }
 
+    if (analysis.nested_bindings.contains(enum_name)) try natural_names.put(allocator, enum_name, {});
     const receiver = try names.claim_receiver(enum_name, &natural_names);
+    if (analysis.targets.count() > 0) try analysis.receivers.put(allocator, @intFromEnum(index), receiver);
     var member_plans: std.ArrayList(MemberPlan) = .empty;
     defer member_plans.deinit(allocator);
     var assigned_names: std.StringHashMapUnmanaged(void) = .empty;
@@ -153,6 +157,9 @@ pub fn emit(
                 local = member_local;
             }
         }
+        if (local == null and member.initializer != .null and try analysis.member_kind(member_index) == .unknown) {
+            local = try names.claim_generated_preferred("_value", 1);
+        }
         try member_plans.append(allocator, .{
             .index = member_index,
             .name = reference_name,
@@ -164,6 +171,7 @@ pub fn emit(
     errdefer writer.deinit();
     var identifier_replacements: std.ArrayList(IdentifierReplacement) = .empty;
     defer identifier_replacements.deinit(allocator);
+    errdefer for (identifier_replacements.items) |replacement| allocator.free(replacement.text);
     try writer.claim_initial_line(file.tree.span(index).start);
 
     if (declaration_plan.declare_binding) {
@@ -244,7 +252,8 @@ pub fn emit(
         }
 
         const initializer_span = file.tree.span(member.initializer);
-        const string_initializer = file.tree.data(member.initializer) == .string_literal;
+        const value_kind = try analysis.member_kind(plan.index);
+        const string_initializer = value_kind == .string;
         if (plan.local) |local| {
             try writer.append("const ");
             try writer.append(local);
@@ -256,9 +265,14 @@ pub fn emit(
                 &reference_locals,
                 member_references,
                 &identifier_replacements,
+                analysis,
+                index,
+                receiver,
             );
             try writer.append(";");
-            if (string_initializer) {
+            if (value_kind == .unknown) {
+                try append_unknown_assignment(&writer, receiver, key.items, local);
+            } else if (string_initializer) {
                 try writer.append(receiver);
                 try writer.append("[");
                 try writer.append(key.items);
@@ -285,6 +299,9 @@ pub fn emit(
                 &reference_locals,
                 member_references,
                 &identifier_replacements,
+                analysis,
+                index,
+                receiver,
             );
             if (string_initializer) {
                 try writer.append(";");
@@ -307,7 +324,10 @@ pub fn emit(
     try writer.append_fixed(fixed, id_span.start, id_span.end);
     try writer.append("={}));");
     const owned_replacements = try identifier_replacements.toOwnedSlice(allocator);
-    errdefer allocator.free(owned_replacements);
+    errdefer {
+        for (owned_replacements) |replacement| allocator.free(replacement.text);
+        allocator.free(owned_replacements);
+    }
     return .{
         .fragment = try writer.to_owned_fragment(),
         .identifier_replacements = owned_replacements,
@@ -400,6 +420,23 @@ fn append_numeric_assignment(
     try writer.append("[");
     try writer.append(key);
     try writer.append("]=");
+    try writer.append(value);
+    try writer.append("]=");
+    try writer.append(key);
+    try writer.append(";");
+}
+
+fn append_unknown_assignment(writer: *AlignedWriter, receiver: []const u8, key: []const u8, value: []const u8) Allocator.Error!void {
+    try writer.append(receiver);
+    try writer.append("[");
+    try writer.append(key);
+    try writer.append("]=");
+    try writer.append(value);
+    try writer.append(";if(typeof ");
+    try writer.append(value);
+    try writer.append("!==\"string\")");
+    try writer.append(receiver);
+    try writer.append("[");
     try writer.append(value);
     try writer.append("]=");
     try writer.append(key);
@@ -530,10 +567,14 @@ const AlignedWriter = struct {
         fixed: *const FixedEditPlan,
         expression_span: parser.ast.Span,
         reference_locals: *const std.StringHashMapUnmanaged([]const u8),
-        reference_nodes: []const NodeIndex,
+        reference_nodes: []const enum_analysis.CollectedReference,
         replacements: *std.ArrayList(IdentifierReplacement),
+        analysis: *const enum_analysis.Analysis,
+        declaration: NodeIndex,
+        receiver: []const u8,
     ) Allocator.Error!void {
-        for (reference_nodes) |reference| {
+        for (reference_nodes) |collected| {
+            const reference = collected.node;
             const data = self.file.tree.data(reference);
             const span = self.file.tree.span(reference);
             if (span.start < expression_span.start or span.end > expression_span.end) continue;
@@ -541,9 +582,34 @@ const AlignedWriter = struct {
                 .identifier_reference => |identifier| self.file.tree.string(identifier.name),
                 else => continue,
             };
-            const local = reference_locals.get(name) orelse continue;
-            if (std.mem.eql(u8, name, local)) continue;
-            try replacements.append(self.allocator, .{ .span = span, .text = local });
+            const target = analysis.target(reference) orelse continue;
+            var text: std.ArrayList(u8) = .empty;
+            errdefer text.deinit(self.allocator);
+            const owner = analysis.owner(target.member);
+            if (owner == declaration) {
+                const local = reference_locals.get(name) orelse continue;
+                if (std.mem.eql(u8, name, local)) continue;
+                if (target.shorthand) {
+                    try text.appendSlice(self.allocator, name);
+                    try text.append(self.allocator, ':');
+                }
+                try text.appendSlice(self.allocator, local);
+            } else {
+                if (target.shorthand) {
+                    try text.appendSlice(self.allocator, name);
+                    try text.append(self.allocator, ':');
+                }
+                const same_binding = analysis.declarations.get(owner).binding == analysis.declarations.get(declaration).binding;
+                const owner_id = self.file.tree.data(owner).ts_enum_declaration.id;
+                const object = if (same_binding) receiver else analysis.receivers.get(@intFromEnum(owner)) orelse declarations.identifier_name(&self.file.tree, owner_id);
+                try text.appendSlice(self.allocator, object);
+                try text.append(self.allocator, '[');
+                try append_string_literal(&text, self.allocator, name);
+                try text.append(self.allocator, ']');
+            }
+            const owned = try text.toOwnedSlice(self.allocator);
+            errdefer self.allocator.free(owned);
+            try replacements.append(self.allocator, .{ .span = span, .text = owned });
         }
         try self.append_fixed(fixed, expression_span.start, expression_span.end);
     }

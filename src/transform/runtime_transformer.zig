@@ -1,5 +1,6 @@
 const std = @import("std");
 const declarations = @import("runtime/declarations.zig");
+const enum_analysis = @import("runtime/enum_analysis.zig");
 const parser = @import("parser");
 const fixed_edit_buffer = @import("fixed_edit_buffer.zig");
 const enum_lowering = @import("runtime/enum.zig");
@@ -47,6 +48,7 @@ pub const RuntimeFeatureCollection = struct {
     namespace_exports: std.ArrayList(namespace_lowering.ExportTask) = .empty,
     namespace_capture_stack: std.ArrayList(NamespaceCaptureFrame) = .empty,
     capture_barrier_depth: u32 = 0,
+    enum_has_nested_scopes: bool = false,
     enum_member_stack: std.ArrayList(NodeIndex) = .empty,
     collect_jsx: bool,
     jsx_nodes: std.ArrayList(NodeIndex) = .empty,
@@ -121,10 +123,16 @@ pub const RuntimeFeatureCollection = struct {
                     @intFromEnum(member),
                 );
                 if (!entry.found_existing) entry.value_ptr.* = .empty;
-                try entry.value_ptr.append(self.allocator, index);
+                const parent = ctx.path.parent();
+                const shorthand = if (parent) |p| switch (ctx.tree.data(p)) {
+                    .object_property => |property| property.shorthand,
+                    else => false,
+                } else false;
+                try entry.value_ptr.append(self.allocator, .{ .node = index, .shorthand = shorthand });
             },
             .ts_enum_declaration => |declaration| {
                 if (declaration.declare) return;
+                if (self.enum_member_stack.items.len > 0) self.enum_has_nested_scopes = true;
                 try self.enums.append(self.allocator, index);
             },
             .ts_import_equals_declaration => |declaration| {
@@ -177,7 +185,9 @@ pub const RuntimeFeatureCollection = struct {
                     .whole_statement = whole_statement,
                 });
             },
-            .ts_module_declaration => {},
+            .function, .arrow_function_expression, .class, .ts_module_declaration => {
+                if (self.enum_member_stack.items.len > 0) self.enum_has_nested_scopes = true;
+            },
             .export_named_declaration => |wrapper| {
                 if (wrapper.export_kind == .type or wrapper.declaration == .null) return;
                 const owner = nearest_runtime_namespace(ctx);
@@ -409,6 +419,9 @@ pub fn lower(
             }
         }
     }
+    var enum_semantics = enum_analysis.Analysis.init(allocator, &file.tree, &declaration_plans);
+    defer enum_semantics.deinit();
+    try enum_semantics.collect(collection.enums.items, &collection.enum_references, collection.enum_has_nested_scopes);
     const lower_jsx = jsx.lowers_jsx() and collection.jsx_roots.items.len > 0;
     var emitter: jsx_emitter.Emitter = undefined;
     if (lower_jsx) {
@@ -444,8 +457,12 @@ pub fn lower(
             &collection.enum_references,
             index,
             declaration_plans.get(index),
+            &enum_semantics,
         );
-        defer allocator.free(emission.identifier_replacements);
+        defer {
+            for (emission.identifier_replacements) |replacement| allocator.free(replacement.text);
+            allocator.free(emission.identifier_replacements);
+        }
         const span = file.tree.span(index);
         edits.add_fragment(span.start, span.end, emission.fragment) catch |err| {
             emission.fragment.deinit();

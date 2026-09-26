@@ -134,6 +134,39 @@ export function runApiTests({ stripTypes, transform }, label) {
 		assert.equal(JSON.stringify(vm.runInNewContext(transform(source))), JSON.stringify(expected), source);
 	}
 
+	for (const [source, expected] of [
+		['enum E { A="A", B=A } [E.A,E.B];', ["A", "A"]],
+		['enum E { A=("A"), B=(A) } [E.A,E.B];', ["A", "A"]],
+		['enum E { A="A" } enum E { B=A } [E.A,E.B];', ["A", "A"]],
+		["enum E { A=1 } enum E { B=A+1 } E.B;", 2],
+		["enum E { A=1 } enum E { B={A}.A+1 } E.B;", 2],
+		['enum E { A="A" } enum E { B=`${A}` } [E.A,E.B];', ["A", "A"]],
+		["enum E { A=1 } enum E { B=A+1, C=(()=>{var A=4;return A})() } [E.B,E.C];", [2, 4]],
+		['enum E { A="A" } enum F { A="A", B=E.A } [F.A,F.B];', ["A", "A"]],
+		['enum E { A="A" + "", B=A } [E.A,E.B];', ["A", "A"]],
+		["enum E { A=`A`, B=A } [E.A,E.B];", ["A", "A"]],
+		['const value="A"; enum E { A=value, B=A } [E.A,E.B];', ["A", "A"]],
+		["enum E { A=1 } enum E { B=((A:number)=>A)(3) } E.B;", 3],
+		["enum E { A=1 } enum E { B=(()=>{var A=4;return A})() } E.B;", 4],
+		["enum E { A=1 } enum E { B=(()=>{const A=5;return A})() } E.B;", 5],
+		["enum E { A=1 } enum E { B=(({A}:{A:number})=>A)({A:6}) } E.B;", 6],
+		["enum E { A=1 } enum E { B=(():number=>{return {A}.A+1})() } E.B;", 2],
+		["enum E { A=1 } enum E { B=(()=>{enum F{C=A+1};return F.C})() } E.B;", 2],
+		["enum E { A=1 } { enum E { A=3 } enum E { B=A+1 } E.B; }", 4],
+		["let calls=0; function get(){calls++;return 9;} enum E { A=get() } [calls,E.A,E[9]];", [1, 9, "A"]],
+		['enum E { A="A" } function f(){const E={A:2};enum F{B=E.A}return [F.B,(F as any)[2]];} f();', [2, "B"]],
+		['enum E { "A B" = ("text") } E["A B"];', "text"],
+	]) {
+		assert.equal(JSON.stringify(vm.runInNewContext(transform(source))), JSON.stringify(expected), source);
+	}
+
+	for (const source of [
+		"enum E { A=1 } enum E { B=((E:any)=>A)(null) } E.B;",
+		"enum E { A=1, B=(()=>{const E=0;enum F{C=A};return F.C})() } E.B;",
+	]) {
+		assert.equal(vm.runInNewContext(transform(source)), 1);
+	}
+
 	const largeSource = "const value: number = 1;\n".repeat(5_000);
 	const largeOutput = "const value         = 1;\n".repeat(5_000);
 	for (let index = 0; index < 8; index += 1) {
