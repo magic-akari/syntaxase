@@ -7,8 +7,8 @@
             .hash = "napi_zig-0.2.0-XRkY0Y8XAgBr17lGjp5nFI-CYpmjGManq9S4TkaY-D5g",
         },
         .yuku = .{
-            .url = "git+https://github.com/yuku-toolchain/yuku#v0.10.0",
-            .hash = "yuku-0.3.0-m6ranjN8EgBlPbV1IwV1bVy_W-Az5Zv23DOfRoGzu7cR",
+            .url = "git+https://github.com/yuku-toolchain/yuku#v0.13.0",
+            .hash = "yuku-0.3.0-m6rankCOEQAqgZW0ycdU_pBNjeRrES1PvpnbbTbPn6SH",
         },
     },
     .minimum_zig_version = "0.16.0",
