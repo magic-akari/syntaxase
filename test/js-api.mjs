@@ -50,10 +50,17 @@ export function runApiTests({ stripTypes, transform }, label) {
 		["<div>&#32;&#10;&#32;</div>", [" \n "]],
 		["<div>\n  first\n  second\n</div>", ["first second"]],
 		["<div>&#9;&#13;{42}&#32;</div>", ["\t\r", 42, " "]],
+		["<div>&amp;lt;&amp;#10;</div>", ["&lt;&#10;"]],
 	]) {
 		const actual = vm.runInNewContext(transform(source, classic), { React });
 		assert.deepEqual(actual, expected);
 	}
+	assert.equal(
+		vm.runInNewContext(transform('<div title="&amp;lt;&amp;#10;" />', classic), {
+			React: { createElement: (_tag, props) => props.title },
+		}),
+		"&lt;&#10;",
+	);
 	const devCode = transform("function f(undefined: any) { return <div />; } f(123);", {
 		jsx: { runtime: "automatic", development: true },
 	});

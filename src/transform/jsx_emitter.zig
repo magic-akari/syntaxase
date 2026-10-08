@@ -432,12 +432,10 @@ pub const Emitter = struct {
         if (value_index == .null) return generated_fragment(self.allocator, "true");
         switch (self.file.tree.data(value_index)) {
             .string_literal => |literal| {
-                const decoded = try jsx_entities.decode(
+                const normalized = try normalize_attribute_string(
                     self.allocator,
                     self.file.tree.string(literal.value),
                 );
-                defer self.allocator.free(decoded);
-                const normalized = try normalize_attribute_string(self.allocator, decoded);
                 defer self.allocator.free(normalized);
                 var result = RuntimeFragment.init(self.allocator);
                 errdefer result.deinit();
@@ -486,8 +484,11 @@ pub const Emitter = struct {
         };
         for (self.file.tree.extra(range)) |child_index| {
             switch (self.file.tree.data(child_index)) {
-                .jsx_text => |text| {
-                    const cleaned = try clean_text(self.allocator, self.file.tree.string(text.value));
+                .jsx_text => {
+                    // Fold source whitespace before decoding entities that may contain whitespace.
+                    const span = self.file.tree.span(child_index);
+                    const raw = self.file.source()[span.start..span.end];
+                    const cleaned = try clean_text(self.allocator, raw);
                     defer self.allocator.free(cleaned);
                     if (cleaned.len == 0) continue;
                     const decoded = try jsx_entities.decode(self.allocator, cleaned);
