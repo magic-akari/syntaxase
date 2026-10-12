@@ -3,15 +3,15 @@
     .version = "0.1.0",
     .dependencies = .{
         .napi_zig = .{
-            .url = "git+https://github.com/yuku-toolchain/napi-zig?ref=HEAD#253f5a92b1c0c70ad13a6583993a9befb88d1116",
-            .hash = "napi_zig-0.2.0-XRkY0Y8XAgBr17lGjp5nFI-CYpmjGManq9S4TkaY-D5g",
+            .url = "git+https://github.com/yuku-toolchain/napi-zig#2ef8928d9cdf70af1cc6b17928f506c0a5ca0076",
+            .hash = "napi_zig-0.2.0-XRkY0UsWAgAqaAoq4Zx7sCD39BNi-Uiq0uMS8sIX_ZUZ",
         },
         .yuku = .{
-            .url = "git+https://github.com/yuku-toolchain/yuku#v0.18.1",
-            .hash = "yuku-0.18.1-m6ranr0ZEgCeT_8egH2O0_R63ZPle-fcOQLMu37lQQrk",
+            .url = "git+https://github.com/yuku-toolchain/yuku#v0.19.0",
+            .hash = "yuku-0.19.0-m6ranuYbEgDKEWKLhPKoNKdPgLoB5X6vElY2wFZXqh6m",
         },
     },
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
     .fingerprint = 0xad04d111d608bf68,
     .paths = .{
         "build.zig",

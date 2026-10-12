@@ -123,7 +123,7 @@ pub const RuntimeFeatureCollection = struct {
                 const member = self.enum_member_stack.getLastOrNull() orelse return;
                 const entry = try self.enum_references.getOrPut(
                     self.allocator,
-                    @intFromEnum(member),
+                    @backingInt(member),
                 );
                 if (!entry.found_existing) entry.value_ptr.* = .empty;
                 const parent = ctx.path.parent();
@@ -176,7 +176,7 @@ pub const RuntimeFeatureCollection = struct {
                 });
                 try self.parameter_property_tasks.put(
                     self.allocator,
-                    @intFromEnum(method.value),
+                    @backingInt(method.value),
                     task_index,
                 );
             },
@@ -272,7 +272,7 @@ pub const RuntimeFeatureCollection = struct {
     ) ?usize {
         var depth: usize = 1;
         while (ctx.path.ancestor(depth)) |ancestor| : (depth += 1) {
-            if (self.parameter_property_tasks.get(@intFromEnum(ancestor))) |task_index| return task_index;
+            if (self.parameter_property_tasks.get(@backingInt(ancestor))) |task_index| return task_index;
             switch (ctx.tree.data(ancestor)) {
                 .function, .class => return null,
                 else => {},

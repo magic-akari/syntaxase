@@ -14,7 +14,7 @@ pub const FixedSubstitution = enum(u8) {
     right_parenthesis = ')',
 
     fn byte(self: FixedSubstitution) u8 {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
 };
 

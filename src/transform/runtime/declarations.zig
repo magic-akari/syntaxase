@@ -54,11 +54,11 @@ pub const Declarations = struct {
     pub fn collect(self: *Declarations, tree: *const parser.ast.Tree) Allocator.Error!void {
         for (self.sites.items) |site| {
             const name = identifier_name(tree, root_name(tree, site.id));
-            const scopes = try self.scopes.getOrPut(self.allocator, @intFromEnum(site.scope));
+            const scopes = try self.scopes.getOrPut(self.allocator, @backingInt(site.scope));
             if (!scopes.found_existing) scopes.value_ptr.* = .empty;
             const entry = try scopes.value_ptr.getOrPut(self.allocator, name);
             if (!entry.found_existing) entry.value_ptr.* = site.index;
-            try self.plans.put(self.allocator, @intFromEnum(site.index), .{
+            try self.plans.put(self.allocator, @backingInt(site.index), .{
                 .binding = entry.value_ptr.*,
                 .scope = site.scope,
                 .declare_binding = !entry.found_existing,
@@ -69,7 +69,7 @@ pub const Declarations = struct {
     }
 
     pub fn get(self: *const Declarations, index: NodeIndex) Plan {
-        return self.plans.get(@intFromEnum(index)).?;
+        return self.plans.get(@backingInt(index)).?;
     }
 };
 

@@ -60,4 +60,9 @@ function loadBinding() {
   );
 }
 
-export default loadBinding();
+let binding;
+
+export function load() {
+  if (binding === undefined) binding = loadBinding();
+  return binding;
+}

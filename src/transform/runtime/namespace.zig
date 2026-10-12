@@ -69,7 +69,7 @@ pub const Lowerer = struct {
     ) Allocator.Error!void {
         try self.capture_risks.ensureTotalCapacity(self.allocator, @intCast(tasks.len));
         for (tasks) |task| {
-            self.capture_risks.putAssumeCapacity(@intFromEnum(task.index), task.capture_risk);
+            self.capture_risks.putAssumeCapacity(@backingInt(task.index), task.capture_risk);
         }
     }
 
@@ -190,7 +190,7 @@ pub const Lowerer = struct {
     }
 
     fn resolve_chain(self: *Lowerer, index: NodeIndex) Allocator.Error![]const Binding {
-        const key = @intFromEnum(index);
+        const key = @backingInt(index);
         if (self.bindings.get(key)) |existing| return existing;
         const declaration = self.file.tree.data(index).ts_module_declaration;
         var parts: std.ArrayList(NodeIndex) = .empty;

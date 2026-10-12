@@ -1,4 +1,4 @@
-import binding from "./binding.js";
+import { load } from "./binding.js";
 import { assertSourceText, resolveStripTypesOptions, resolveTransformOptions } from "./options.js";
 
 const encoder = new TextEncoder();
@@ -21,5 +21,5 @@ function invoke(sourceText, mode, firstOption, secondOption) {
 	const source = encoder.encode(sourceText);
 	const first = firstOption.length === 0 ? empty : encoder.encode(firstOption);
 	const second = secondOption.length === 0 ? empty : encoder.encode(secondOption);
-	return binding.run(source, mode, first, second);
+	return load().run(source, mode, first, second);
 }

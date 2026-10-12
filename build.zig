@@ -100,7 +100,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(cli);
 
     const run_cli = b.addRunArtifact(cli);
-    if (b.args) |args| run_cli.addArgs(args);
+    run_cli.addPassthruArgs();
     const run_step = b.step("run", "Run the native Syntaxase CLI");
     run_step.dependOn(&run_cli.step);
 

@@ -133,7 +133,7 @@ pub fn emit(
 
     if (analysis.nested_bindings.contains(enum_name)) try natural_names.put(allocator, enum_name, {});
     const receiver = try names.claim_receiver(enum_name, &natural_names);
-    if (analysis.targets.count() > 0) try analysis.receivers.put(allocator, @intFromEnum(index), receiver);
+    if (analysis.targets.count() > 0) try analysis.receivers.put(allocator, @backingInt(index), receiver);
     var member_plans: std.ArrayList(MemberPlan) = .empty;
     defer member_plans.deinit(allocator);
     var assigned_names: std.StringHashMapUnmanaged(void) = .empty;
@@ -203,7 +203,7 @@ pub fn emit(
             file.tree.span(member_plans.items[member_number + 1].index).start
         else
             file.tree.span(index).end;
-        const member_references = if (references_by_member.get(@intFromEnum(plan.index))) |references|
+        const member_references = if (references_by_member.get(@backingInt(plan.index))) |references|
             references.items
         else
             &.{};
@@ -601,7 +601,7 @@ const AlignedWriter = struct {
                 }
                 const same_binding = analysis.declarations.get(owner).binding == analysis.declarations.get(declaration).binding;
                 const owner_id = self.file.tree.data(owner).ts_enum_declaration.id;
-                const object = if (same_binding) receiver else analysis.receivers.get(@intFromEnum(owner)) orelse declarations.identifier_name(&self.file.tree, owner_id);
+                const object = if (same_binding) receiver else analysis.receivers.get(@backingInt(owner)) orelse declarations.identifier_name(&self.file.tree, owner_id);
                 try text.appendSlice(self.allocator, object);
                 try text.append(self.allocator, '[');
                 try append_string_literal(&text, self.allocator, name);

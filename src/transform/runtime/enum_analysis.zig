@@ -66,12 +66,12 @@ pub const Analysis = struct {
             const name = declarations.identifier_name(self.tree, node.id);
             try self.relevant_names.put(self.allocator, name, {});
             const identity = self.declarations.get(index).binding;
-            const group = try self.groups.getOrPut(self.allocator, @intFromEnum(identity));
+            const group = try self.groups.getOrPut(self.allocator, @backingInt(identity));
             if (!group.found_existing) group.value_ptr.* = .empty;
             const body = self.tree.data(node.body).ts_enum_body;
             for (self.tree.extra(body.members)) |member_index| {
                 const member = self.tree.data(member_index).ts_enum_member;
-                try self.members.put(self.allocator, @intFromEnum(member_index), .{ .owner = index });
+                try self.members.put(self.allocator, @backingInt(member_index), .{ .owner = index });
                 if (member_name(self.tree, member)) |member_text| {
                     try self.relevant_names.put(self.allocator, member_text, {});
                     try group.value_ptr.put(self.allocator, member_text, member_index);
@@ -87,9 +87,9 @@ pub const Analysis = struct {
         for (self.references.items) |reference| {
             const name = self.tree.string(self.tree.data(reference.node).identifier_reference.name);
             const binding = self.lookup(reference.scope, name);
-            if (binding == .enumeration) try self.resolved.put(self.allocator, @intFromEnum(reference.node), binding);
+            if (binding == .enumeration) try self.resolved.put(self.allocator, @backingInt(reference.node), binding);
             if (binding == .member) {
-                try self.targets.put(self.allocator, @intFromEnum(reference.node), .{
+                try self.targets.put(self.allocator, @backingInt(reference.node), .{
                     .member = binding.member,
                     .shorthand = reference.shorthand,
                 });
@@ -100,13 +100,13 @@ pub const Analysis = struct {
     fn collect_local(self: *Analysis, references_by_member: *const ReferenceMap) Allocator.Error!bool {
         var members = references_by_member.iterator();
         while (members.next()) |entry| {
-            const enumeration = self.owner(@enumFromInt(entry.key_ptr.*));
+            const enumeration = self.owner(@fromBackingInt(@intCast(entry.key_ptr.*)));
             const identity = self.declarations.get(enumeration).binding;
-            const group = self.groups.get(@intFromEnum(identity)).?;
+            const group = self.groups.get(@backingInt(identity)).?;
             for (entry.value_ptr.items) |reference| {
                 const name = self.tree.string(self.tree.data(reference.node).identifier_reference.name);
                 if (group.get(name)) |member| {
-                    try self.targets.put(self.allocator, @intFromEnum(reference.node), .{
+                    try self.targets.put(self.allocator, @backingInt(reference.node), .{
                         .member = member,
                         .shorthand = reference.shorthand,
                     });
@@ -121,11 +121,11 @@ pub const Analysis = struct {
     }
 
     pub fn target(self: *const Analysis, reference: NodeIndex) ?Target {
-        return self.targets.get(@intFromEnum(reference));
+        return self.targets.get(@backingInt(reference));
     }
 
     pub fn owner(self: *const Analysis, member: NodeIndex) NodeIndex {
-        return self.members.get(@intFromEnum(member)).?.owner;
+        return self.members.get(@backingInt(member)).?.owner;
     }
 
     pub fn member_kind(self: *Analysis, index: NodeIndex) Allocator.Error!ValueKind {
@@ -148,7 +148,7 @@ pub const Analysis = struct {
         if (!self.resolve_references) return self.expression_kind(initializer);
         // Members are indexed before resolution; recursive queries never grow
         // this map, so the entry remains stable throughout the dependency walk.
-        const entry = self.members.getPtr(@intFromEnum(index)).?;
+        const entry = self.members.getPtr(@backingInt(index)).?;
         if (entry.kind) |kind| return kind;
         // A recursive dependency remains unknown instead of recursing forever.
         entry.kind = .unknown;
@@ -166,16 +166,16 @@ pub const Analysis = struct {
             .ts_type_assertion => |node| self.expression_kind(node.expression),
             .ts_satisfies_expression => |node| self.expression_kind(node.expression),
             .ts_non_null_expression => |node| self.expression_kind(node.expression),
-            .identifier_reference => if (self.targets.get(@intFromEnum(index))) |resolved| self.member_kind(resolved.member) else .unknown,
+            .identifier_reference => if (self.targets.get(@backingInt(index))) |resolved| self.member_kind(resolved.member) else .unknown,
             .member_expression => |node| blk: {
-                const binding = self.resolved.get(@intFromEnum(node.object)) orelse break :blk .unknown;
+                const binding = self.resolved.get(@backingInt(node.object)) orelse break :blk .unknown;
                 if (binding != .enumeration) break :blk .unknown;
                 const name = switch (self.tree.data(node.property)) {
                     .identifier_name => |id| self.tree.string(id.name),
                     .string_literal => |literal| self.tree.string(literal.value),
                     else => break :blk .unknown,
                 };
-                const group = self.groups.get(@intFromEnum(binding.enumeration)) orelse break :blk .unknown;
+                const group = self.groups.get(@backingInt(binding.enumeration)) orelse break :blk .unknown;
                 const member = group.get(name) orelse break :blk .unknown;
                 break :blk try self.member_kind(member);
             },
@@ -193,10 +193,10 @@ pub const Analysis = struct {
     fn lookup(self: *const Analysis, start: ScopeId, name: []const u8) Binding {
         var current = start;
         while (current != .none) {
-            const scope = self.scopes.items[@intFromEnum(current)];
+            const scope = self.scopes.items[@backingInt(current)];
             if (scope.bindings.get(name)) |binding| return binding;
             if (scope.members != .null) {
-                const group = self.groups.get(@intFromEnum(scope.members)).?;
+                const group = self.groups.get(@backingInt(scope.members)).?;
                 if (group.get(name)) |member| return .{ .member = member };
             }
             current = scope.parent;
@@ -206,7 +206,7 @@ pub const Analysis = struct {
 
     fn bind(self: *Analysis, scope: ScopeId, name: []const u8, binding: Binding) Allocator.Error!void {
         if (!self.relevant_names.contains(name)) return;
-        const entry = &self.scopes.items[@intFromEnum(scope)];
+        const entry = &self.scopes.items[@backingInt(scope)];
         try entry.bindings.put(self.allocator, name, binding);
     }
 
@@ -240,9 +240,9 @@ pub const Analysis = struct {
             }
             if (is_scope(data)) {
                 const parent = self.current;
-                self.current = @enumFromInt(analysis.scopes.items.len);
+                self.current = @fromBackingInt(@intCast(analysis.scopes.items.len));
                 const members = if (data == .ts_enum_body) analysis.declarations.get(ctx.path.parent().?).binding else .null;
-                const hoist_target = if (is_hoist_scope(data)) self.current else analysis.scopes.items[@intFromEnum(parent)].hoist_target;
+                const hoist_target = if (is_hoist_scope(data)) self.current else analysis.scopes.items[@backingInt(parent)].hoist_target;
                 try analysis.scopes.append(analysis.allocator, .{ .node = index, .parent = parent, .hoist_target = hoist_target, .members = members });
                 switch (data) {
                     .function => |node| {
@@ -269,7 +269,7 @@ pub const Analysis = struct {
                         const node = ctx.tree.data(ancestor);
                         if (node == .variable_declaration) {
                             if (node.variable_declaration.kind == .@"var") {
-                                scope = analysis.scopes.items[@intFromEnum(scope)].hoist_target;
+                                scope = analysis.scopes.items[@backingInt(scope)].hoist_target;
                             }
                             break;
                         }
@@ -294,7 +294,7 @@ pub const Analysis = struct {
         pub fn exit_node(self: *Visitor, data: parser.ast.NodeData, index: NodeIndex, _: *Ctx) void {
             if (data == .ts_enum_member) self.member_depth -= 1;
             if (self.current != .none) {
-                const scope = self.analysis.scopes.items[@intFromEnum(self.current)];
+                const scope = self.analysis.scopes.items[@backingInt(self.current)];
                 if (scope.node == index) self.current = scope.parent;
             }
         }
