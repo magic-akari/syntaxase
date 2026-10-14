@@ -76,8 +76,8 @@ jobs:
                     benchmark/native.zig \
                     benchmark/gungraun
                   node benchmark/prepare.mjs
-                  zig build --fetch
-                  zig build -Dcpu="$BENCHMARK_CPU" benchmark-native
+                  mise exec -- zig build --fetch
+                  mise exec -- zig build -Dcpu="$BENCHMARK_CPU" benchmark-native
                   cargo bench --quiet --locked \
                     --manifest-path benchmark/gungraun/Cargo.toml \
                     --bench type-strip -- \
@@ -93,8 +93,8 @@ jobs:
               run: |
                   git checkout --detach "$COMPARE_SHA"
                   node benchmark/prepare.mjs
-                  zig build --fetch
-                  zig build -Dcpu="$BENCHMARK_CPU" benchmark-native
+                  mise exec -- zig build --fetch
+                  mise exec -- zig build -Dcpu="$BENCHMARK_CPU" benchmark-native
 
                   report="$RUNNER_TEMP/gungraun-report.txt"
                   summary="$RUNNER_TEMP/gungraun-summary.md"
