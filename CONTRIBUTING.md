@@ -245,7 +245,7 @@ mise run bench:callgrind
 
 The benchmark only runs Syntaxase. It loads each corpus before entering the
 exported strip function, disables branch and cache simulation, and reports
-Callgrind `Ir`. It requires Linux, Valgrind, and `gungraun-runner` 0.19.4.
+Callgrind `Ir`. It requires Linux, Valgrind, and `gungraun-runner` 0.20.0.
 Treat `Ir` as the primary metric; branch and cache simulation are intentionally
 disabled. Pull requests run the base and merge revisions in the same Linux CI
 job with the same toolchain and benchmark harness.

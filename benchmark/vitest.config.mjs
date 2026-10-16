@@ -10,13 +10,6 @@ const benchmarkDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryDirectory = path.dirname(benchmarkDirectory);
 const defaultBridgePath = path.join(repositoryDirectory, "zig-out", "wasm", "index.js");
 const bridgePath = path.resolve(process.env.SYNTAXASE_WASM_BRIDGE ?? defaultBridgePath);
-const oxcWorkerPath = path.join(
-	benchmarkDirectory,
-	"node_modules",
-	"@oxc-transform",
-	"binding-wasm32-wasi",
-	"wasi-worker-browser.mjs",
-);
 
 try {
 	accessSync(bridgePath);
@@ -30,11 +23,10 @@ export default defineConfig({
 	resolve: {
 		alias: {
 			"syntaxase-wasm": bridgePath,
-			"@oxc-transform/binding-wasm32-wasi/wasi-worker-browser.mjs": oxcWorkerPath,
 		},
 	},
 	optimizeDeps: {
-		exclude: ["oxc-transform", "@oxc-transform/binding-wasm32-wasi"],
+		exclude: ["oxc-transform", "@oxc-transform/binding-wasm32-wasip1"],
 	},
 	server: {
 		fs: {

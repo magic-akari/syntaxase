@@ -3,16 +3,16 @@
 	"private": true,
 	"type": "module",
 	"dependencies": {
-		"@babel/standalone": "8.0.6",
-		"@oxc-transform/binding-wasm32-wasi": "0.151.0",
-		"oxc-transform": "0.151.0",
+		"@babel/standalone": "8.0.7",
+		"@oxc-transform/binding-wasm32-wasip1": "0.154.0",
+		"oxc-transform": "0.154.0",
 		"sucrase": "3.35.1",
 		"ts-blank-space": "0.9.0"
 	},
 	"devDependencies": {
-		"@vitest/browser": "5.0.2",
-		"@vitest/browser-playwright": "5.0.2",
-		"playwright": "1.63.0",
-		"vitest": "5.0.2"
+		"@vitest/browser": "5.0.5",
+		"@vitest/browser-playwright": "5.0.5",
+		"playwright": "1.64.1",
+		"vitest": "5.0.5"
 	}
 }
