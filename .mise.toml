@@ -2,7 +2,7 @@ min_version = "2026.8.10"
 
 [tools]
 dprint = "0.57.4"
-node = "24.21.0"
+node = "24.22.0"
 "npm:napi-zig" = "0.2.8"
 zig = "0.17.0"
 
