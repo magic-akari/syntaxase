@@ -10,7 +10,7 @@ pub const Edits = fixed_edit_buffer.FixedEditBuffer;
 pub const Plan = fixed_edit_buffer.FixedEditPlan;
 
 pub fn parse(allocator: Allocator, source: []const u8) Allocator.Error!ParsedSource {
-    return ParsedSource.parse(allocator, source, .ts);
+    return ParsedSource.parse(allocator, source, .{ .lang = .ts, .comments = .none });
 }
 
 pub fn init_edits(allocator: Allocator, file: *const ParsedSource) Edits {

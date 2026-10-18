@@ -8,23 +8,28 @@ const Allocator = std.mem.Allocator;
 
 /// Parsed source and the lossless indexes used by Syntaxase transforms.
 ///
-/// The Yuku tree owns the AST, tokens, comments, and diagnostics. The source
-/// bytes remain borrowed from the caller for the lifetime of this value.
+/// The Yuku tree owns the AST, tokens, collected comments, and diagnostics.
+/// Source bytes remain borrowed from the caller for the lifetime of this value.
 pub const SourceFile = struct {
     allocator: Allocator,
     tree: parser.ast.Tree,
     layout: ?source_layout_module.SourceLayout = null,
 
+    pub const ParseOptions = struct {
+        lang: parser.ast.Lang,
+        comments: parser.CommentMode = .flat,
+    };
+
     pub fn parse(
         allocator: Allocator,
         source_text: []const u8,
-        lang: parser.ast.Lang,
+        options: ParseOptions,
     ) Allocator.Error!SourceFile {
         var tree = try parser.parse(allocator, source_text, .{
             .source_type = .module,
-            .lang = lang,
+            .lang = options.lang,
             .preserve_parens = true,
-            .comments = .flat,
+            .comments = options.comments,
             .tokens = true,
         });
         errdefer tree.deinit();
@@ -65,7 +70,7 @@ pub const SourceFile = struct {
 test "source file collects parser-authoritative tokens and comments" {
     const allocator = std.testing.allocator;
     const source = "const value: Foo /* keep */ = input;";
-    var file = try SourceFile.parse(allocator, source, .ts);
+    var file = try SourceFile.parse(allocator, source, .{ .lang = .ts });
     defer file.deinit();
 
     try std.testing.expect(file.tree.tokens.len > 0);
@@ -78,7 +83,7 @@ test "source file collects parser-authoritative tokens and comments" {
 test "source file preserves Yuku diagnostics without rejecting the tree" {
     const allocator = std.testing.allocator;
     const source = "const = ;";
-    var file = try SourceFile.parse(allocator, source, .ts);
+    var file = try SourceFile.parse(allocator, source, .{ .lang = .ts });
     defer file.deinit();
 
     try std.testing.expect(file.tree.hasErrors());
@@ -88,7 +93,7 @@ test "source file preserves Yuku diagnostics without rejecting the tree" {
 test "source file layout shares native byte coordinates" {
     const allocator = std.testing.allocator;
     const source = "类\nconst value = 1;";
-    var file = try SourceFile.parse(allocator, source, .ts);
+    var file = try SourceFile.parse(allocator, source, .{ .lang = .ts });
     defer file.deinit();
     try file.ensure_layout();
 
@@ -97,7 +102,7 @@ test "source file layout shares native byte coordinates" {
 
 test "source file receives decoded escaped identifier names from Yuku" {
     const allocator = std.testing.allocator;
-    var file = try SourceFile.parse(allocator, "const _\\u006Asx = 1;", .ts);
+    var file = try SourceFile.parse(allocator, "const _\\u006Asx = 1;", .{ .lang = .ts });
     defer file.deinit();
 
     try std.testing.expect(!file.tree.hasErrors());

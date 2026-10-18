@@ -84,10 +84,10 @@ const TransformMode = union(enum) {
     strip_types: StripTypesLanguage,
     transform: JSXConfig,
 
-    fn lang(mode: TransformMode) parser.ast.Lang {
+    fn parse_options(mode: TransformMode) SourceFile.ParseOptions {
         return switch (mode) {
-            .strip_types => |language| language.parser_lang(),
-            .transform => |jsx| if (jsx.parses_jsx()) .tsx else .ts,
+            .strip_types => |language| .{ .lang = language.parser_lang(), .comments = .none },
+            .transform => |jsx| .{ .lang = if (jsx.parses_jsx()) .tsx else .ts },
         };
     }
 };
@@ -170,7 +170,7 @@ fn run_into(
     defer arena.deinit();
     const scratch = arena.allocator();
 
-    var file = try SourceFile.parse(scratch, source_text, mode.lang());
+    var file = try SourceFile.parse(scratch, source_text, mode.parse_options());
     defer file.deinit();
 
     try transform_file_into(scratch, allocator, &file, mode, output);
@@ -350,7 +350,7 @@ fn lower_file_into(
 test "source layout remains lazy when runtime lowering needs no alignment" {
     const allocator = std.testing.allocator;
     const source = "namespace N { export const value: number = 1; }\n";
-    var file = try SourceFile.parse(allocator, source, .ts);
+    var file = try SourceFile.parse(allocator, source, .{ .lang = .ts });
     defer file.deinit();
 
     const code = try transform_file(allocator, &file, .{ .transform = .disabled });
@@ -362,7 +362,7 @@ test "source layout remains lazy when runtime lowering needs no alignment" {
 test "JSX lowering uses sparse anchors without a full source layout" {
     const allocator = std.testing.allocator;
     const source = "const element = (\n  <div />\n);\n";
-    var file = try SourceFile.parse(allocator, source, .tsx);
+    var file = try SourceFile.parse(allocator, source, .{ .lang = .tsx });
     defer file.deinit();
 
     const code = try transform_file(
@@ -378,7 +378,7 @@ test "JSX lowering uses sparse anchors without a full source layout" {
 test "aligned runtime lowering initializes source layout" {
     const allocator = std.testing.allocator;
     const source = "enum E {\n  A,\n}\n";
-    var file = try SourceFile.parse(allocator, source, .ts);
+    var file = try SourceFile.parse(allocator, source, .{ .lang = .ts });
     defer file.deinit();
 
     const code = try transform_file(allocator, &file, .{ .transform = .disabled });
@@ -569,6 +569,44 @@ test "stripTypes preserves JavaScript UTF-16 width" {
 
     try std.testing.expectEqualStrings("const value       = input;\n", result.code);
     try std.testing.expectEqual(unicode.utf16_width(source), unicode.utf16_width(result.code));
+}
+
+test "stripTypes preserves comments outside erased TS and TSX spans" {
+    const allocator = std.testing.allocator;
+    const cases = [_]struct {
+        lang: StripTypesLanguage,
+        source: []const u8,
+        expected: []const u8,
+    }{
+        .{
+            .lang = .ts,
+            .source = "// keep\r\nconst value/* before */: /* erased */ number = input; /* after */\n",
+            .expected = "// keep\r\nconst value/* before */                      = input; /* after */\n",
+        },
+        .{
+            .lang = .tsx,
+            .source = "const element: Element = <Box>{/* child */ value as Value}</Box>;\n",
+            .expected = "const element          = <Box>{/* child */ value         }</Box>;\n",
+        },
+    };
+
+    for (cases) |case| {
+        var result = try stripTypes(allocator, case.source, .{ .lang = case.lang });
+        defer result.deinit(allocator);
+
+        try std.testing.expectEqualStrings(case.expected, result.code);
+        try std.testing.expectEqual(@as(usize, 0), result.diagnostics.len);
+    }
+}
+
+test "stripTypes retains unterminated comment diagnostics" {
+    const allocator = std.testing.allocator;
+    var result = try stripTypes(allocator, "const value: number = 1; /* unterminated", .{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings("const value: number = 1; /* unterminated", result.code);
+    try std.testing.expectEqual(@as(usize, 1), result.diagnostics.len);
+    try std.testing.expectEqualStrings("Unterminated multi-line comment", result.diagnostics[0].message);
 }
 
 test "transform lowers a native Yuku enum while stripTypes does not" {
