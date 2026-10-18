@@ -7,6 +7,7 @@ const enum_lowering = @import("runtime/enum.zig");
 const import_equals_lowering = @import("runtime/import_equals.zig");
 const jsx_config = @import("jsx_config.zig");
 const jsx_emitter = @import("jsx_emitter.zig");
+const jsx_runtime_helper = @import("jsx_runtime_helper.zig");
 const namespace_lowering = @import("runtime/namespace.zig");
 const parameter_properties_lowering = @import("runtime/parameter_properties.zig");
 const namespace_semantics = @import("namespace_semantics.zig");
@@ -97,7 +98,7 @@ pub const RuntimeFeatureCollection = struct {
         };
         if (runtime_name) |string| {
             const name = ctx.tree.string(string);
-            if (is_automatic_runtime_name(name)) try self.names.add_source_name(name);
+            if (jsx_runtime_helper.Helper.matches_local_name(name)) try self.names.add_source_name(name);
             self.collect_active_namespace_identifier(index, name);
         }
 
@@ -380,25 +381,6 @@ pub const RuntimeFeatureCollection = struct {
         self.collect_active_namespace_capture(name);
     }
 };
-
-fn is_automatic_runtime_name(name: []const u8) bool {
-    const bases = [_][]const u8{
-        "_jsx",
-        "_jsxs",
-        "_jsxDEV",
-        "_Fragment",
-        "_createElement",
-    };
-    for (bases) |base| {
-        if (!std.mem.startsWith(u8, name, base)) continue;
-        const suffix = name[base.len..];
-        if (suffix.len == 0) return true;
-        for (suffix) |byte| {
-            if (!std.ascii.isDigit(byte)) break;
-        } else return true;
-    }
-    return false;
-}
 
 /// Emits the runtime tasks already collected by the fixed traversal.
 pub fn lower(

@@ -466,6 +466,41 @@ test "automatic JSX helper names handle suffix holes and decoded identifiers" {
     );
 }
 
+test "automatic JSX helper metadata preserves collisions sources and import order" {
+    const allocator = std.testing.allocator;
+    const declarations = "const _jsx = 0, _jsx2 = 0, _jsxs = 0, _jsxDEV = 0, _jsxDEV2 = 0, _Fragment = 0, _createElement = 0;\n";
+    const source = declarations ++ "const element = <><A /><B {...props} key=\"id\" /></>;\n";
+    const cases = [_]struct {
+        development: bool,
+        expected: []const u8,
+    }{
+        .{
+            .development = false,
+            .expected = declarations ++
+                "const element = _jsxs2(_Fragment2, {\"children\": [_jsx3(A, {}), _createElement2(B, {...props, \"key\": \"id\"})]});\n" ++
+                "import { createElement as _createElement2 } from \"react\";\n" ++
+                "import { jsx as _jsx3, jsxs as _jsxs2, Fragment as _Fragment2 } from \"react/jsx-runtime\";\n",
+        },
+        .{
+            .development = true,
+            .expected = declarations ++
+                "const element = _jsxDEV3(_Fragment2, {\"children\": [_jsxDEV3(A, {}, void 0, false), _createElement2(B, {...props, \"key\": \"id\"})]}, void 0, true);\n" ++
+                "import { createElement as _createElement2 } from \"react\";\n" ++
+                "import { jsxDEV as _jsxDEV3, Fragment as _Fragment2 } from \"react/jsx-dev-runtime\";\n",
+        },
+    };
+
+    for (cases) |case| {
+        var result = try transform(allocator, source, .{
+            .jsx = .{ .automatic = .{ .development = case.development } },
+        });
+        defer result.deinit(allocator);
+
+        try std.testing.expectEqual(@as(usize, 0), result.diagnostics.len);
+        try std.testing.expectEqualStrings(case.expected, result.code);
+    }
+}
+
 test "automatic JSX helper names do not capture component tags" {
     const allocator = std.testing.allocator;
     const source = "const element = <_jsx />;\n";

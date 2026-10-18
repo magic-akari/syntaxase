@@ -4,6 +4,7 @@ const fixed_edit_buffer = @import("fixed_edit_buffer.zig");
 const js_string = @import("js_string.zig");
 const jsx_config = @import("jsx_config.zig");
 const jsx_entities = @import("jsx_entities.zig");
+const jsx_runtime_helper = @import("jsx_runtime_helper.zig");
 const runtime_edit_buffer = @import("runtime_edit_buffer.zig");
 const runtime_name_allocator = @import("runtime_name_allocator.zig");
 const source_file = @import("source_file.zig");
@@ -12,6 +13,7 @@ const source_layout = @import("source_layout.zig");
 const Allocator = std.mem.Allocator;
 const FixedEditPlan = fixed_edit_buffer.FixedEditPlan;
 const NodeIndex = parser.ast.NodeIndex;
+const JSXHelper = jsx_runtime_helper.Helper;
 const RuntimeEditBuffer = runtime_edit_buffer.RuntimeEditBuffer;
 const RuntimeFragment = runtime_edit_buffer.RuntimeFragment;
 const RuntimeNameAllocator = runtime_name_allocator.RuntimeNameAllocator;
@@ -64,7 +66,7 @@ const EmittedChildren = struct {
 };
 
 const RuntimeImport = struct {
-    imported: []const u8,
+    helper: JSXHelper,
     local: []const u8,
     source: []u8,
 };
@@ -206,7 +208,7 @@ pub const Emitter = struct {
 
         switch (self.file.tree.data(index)) {
             .jsx_fragment => {
-                const helper = try self.automatic_helper(config, "Fragment", null);
+                const helper = try self.automatic_helper(config, .Fragment);
                 var element_type = try generated_fragment(self.allocator, helper);
                 defer element_type.deinit();
                 var properties = try self.emit_automatic_properties(
@@ -241,11 +243,7 @@ pub const Emitter = struct {
                         &children.comments_after_properties,
                     );
                     defer properties.deinit();
-                    const create_element = try self.automatic_helper(
-                        config,
-                        "createElement",
-                        config.import_source,
-                    );
+                    const create_element = try self.automatic_helper(config, .createElement);
                     return self.emit_create_element(
                         index,
                         create_element,
@@ -290,7 +288,7 @@ pub const Emitter = struct {
         var static_children = children.values.items.len > 1;
         for (children.values.items) |child| static_children = static_children or child.is_spread;
         if (config.development) {
-            const helper = try self.automatic_helper(config, "jsxDEV", null);
+            const helper = try self.automatic_helper(config, .jsxDEV);
             try append_fmt(&result, "{s}(", .{helper});
             try result.append_fragment(element_type);
             try result.append_generated(", ");
@@ -305,8 +303,8 @@ pub const Emitter = struct {
             return result;
         }
 
-        const imported = if (static_children) "jsxs" else "jsx";
-        const helper = try self.automatic_helper(config, imported, null);
+        const imported: JSXHelper = if (static_children) .jsxs else .jsx;
+        const helper = try self.automatic_helper(config, imported);
         try append_fmt(&result, "{s}(", .{helper});
         try result.append_fragment(element_type);
         try result.append_generated(", ");
@@ -751,31 +749,28 @@ pub const Emitter = struct {
     fn automatic_helper(
         self: *Emitter,
         config: jsx_config.Automatic,
-        imported: []const u8,
-        source_override: ?[]const u8,
+        helper: JSXHelper,
     ) Allocator.Error![]const u8 {
-        const source = if (source_override) |override|
-            try self.allocator.dupe(u8, override)
-        else
+        const source = if (helper.runtime_module(config.development)) |module|
             try std.fmt.allocPrint(
                 self.allocator,
                 "{s}/{s}",
-                .{ config.import_source, if (config.development) "jsx-dev-runtime" else "jsx-runtime" },
-            );
+                .{ config.import_source, module },
+            )
+        else
+            try self.allocator.dupe(u8, config.import_source);
         errdefer self.allocator.free(source);
         for (self.imports.items) |runtime_import| {
             if (std.mem.eql(u8, runtime_import.source, source) and
-                std.mem.eql(u8, runtime_import.imported, imported))
+                runtime_import.helper == helper)
             {
                 self.allocator.free(source);
                 return runtime_import.local;
             }
         }
-        const base = try std.fmt.allocPrint(self.allocator, "_{s}", .{imported});
-        defer self.allocator.free(base);
-        const local = try self.names.claim_generated_preferred(base, 2);
+        const local = try self.names.claim_generated_preferred(helper.local_base(), 2);
         try self.imports.append(self.allocator, .{
-            .imported = imported,
+            .helper = helper,
             .local = local,
             .source = source,
         });
@@ -800,7 +795,7 @@ pub const Emitter = struct {
             try line.appendSlice(self.allocator, "import { ");
             for (self.imports.items[start..end], 0..) |runtime_import, index| {
                 if (index > 0) try line.appendSlice(self.allocator, ", ");
-                try line.appendSlice(self.allocator, runtime_import.imported);
+                try line.appendSlice(self.allocator, runtime_import.helper.import_name());
                 try line.appendSlice(self.allocator, " as ");
                 try line.appendSlice(self.allocator, runtime_import.local);
             }
@@ -968,17 +963,5 @@ fn clean_text(allocator: Allocator, value: []const u8) Allocator.Error![]u8 {
 fn less_than_runtime_import(_: void, left: RuntimeImport, right: RuntimeImport) bool {
     const source_order = std.mem.order(u8, left.source, right.source);
     if (source_order != .eq) return source_order == .lt;
-    const left_order = runtime_import_order(left.imported);
-    const right_order = runtime_import_order(right.imported);
-    if (left_order != right_order) return left_order < right_order;
-    return std.mem.lessThan(u8, left.imported, right.imported);
-}
-
-fn runtime_import_order(imported: []const u8) u8 {
-    if (std.mem.eql(u8, imported, "jsx")) return 0;
-    if (std.mem.eql(u8, imported, "jsxs")) return 1;
-    if (std.mem.eql(u8, imported, "jsxDEV")) return 2;
-    if (std.mem.eql(u8, imported, "Fragment")) return 3;
-    if (std.mem.eql(u8, imported, "createElement")) return 4;
-    return std.math.maxInt(u8);
+    return @backingInt(left.helper) < @backingInt(right.helper);
 }
