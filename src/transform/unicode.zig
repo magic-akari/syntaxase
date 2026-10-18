@@ -63,19 +63,21 @@ pub fn append_blanked(
                 written += vector_len;
                 offset += vector_len;
             }
-            if (offset == source.len) break;
         }
 
-        const byte = source[offset];
-        if (byte < 0x80) {
+        // Finish the ASCII tail without retrying the vector loop for each byte.
+        while (offset < source.len) {
+            const byte = source[offset];
+            if (byte >= 0x80) break;
+
             destination[written] = switch (byte) {
                 '\t', '\r', '\n' => byte,
                 else => ' ',
             };
             written += 1;
             offset += 1;
-            continue;
         }
+        if (offset == source.len) break;
 
         const start = offset;
         const codepoint = next_codepoint(source, &offset);
