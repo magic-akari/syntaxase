@@ -65,6 +65,24 @@ pub fn append_blanked(
             }
         }
 
+        while (offset + @sizeOf(u64) <= source.len) {
+            const word = std.mem.readInt(u64, source[offset..][0..@sizeOf(u64)], .little);
+            const high_bits = 0x8080_8080_8080_8080;
+            if (word & high_bits != 0) break;
+
+            // For ASCII bytes, adding 0x7f cannot carry into the next byte.
+            // Only a zero byte leaves its high bit clear after the addition.
+            const tab_or_cr = (word & 0xfbfb_fbfb_fbfb_fbfb) ^ 0x0909_0909_0909_0909;
+            const lf = word ^ 0x0a0a_0a0a_0a0a_0a0a;
+            const preserved = ~((tab_or_cr + 0x7f7f_7f7f_7f7f_7f7f) &
+                (lf + 0x7f7f_7f7f_7f7f_7f7f)) & high_bits;
+            const mask = (preserved >> 7) * 0xff;
+            const blanked = (word & mask) | (0x2020_2020_2020_2020 & ~mask);
+            std.mem.writeInt(u64, destination[written..][0..@sizeOf(u64)], blanked, .little);
+            written += @sizeOf(u64);
+            offset += @sizeOf(u64);
+        }
+
         // Finish the ASCII tail without retrying the vector loop for each byte.
         while (offset < source.len) {
             const byte = source[offset];
@@ -210,6 +228,30 @@ test "vector blanking matches the scalar algorithm at every nearby boundary" {
         try append_blanked(&vector_output, allocator, source[0..length]);
         try append_blanked_scalar(&scalar_output, allocator, source[0..length]);
         try std.testing.expectEqualSlices(u8, scalar_output.items, vector_output.items);
+    }
+}
+
+test "blanking matches the scalar algorithm for ASCII chunks of every nearby length" {
+    const allocator = std.testing.allocator;
+    const vector_len = std.simd.suggestVectorLength(u8) orelse 16;
+    var source: [128]u8 = undefined;
+    for (&source, 0..) |*byte, index| byte.* = @intCast(index);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(allocator);
+    try append_blanked_scalar(&expected, allocator, &source);
+
+    var output: std.ArrayList(u8) = .empty;
+    defer output.deinit(allocator);
+    for (1..vector_len * 2 + 8) |chunk_len| {
+        output.clearRetainingCapacity();
+        var offset: usize = 0;
+        while (offset < source.len) {
+            const end = @min(offset + chunk_len, source.len);
+            try append_blanked(&output, allocator, source[offset..end]);
+            offset = end;
+        }
+        try std.testing.expectEqualSlices(u8, expected.items, output.items);
     }
 }
 
