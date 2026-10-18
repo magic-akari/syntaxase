@@ -1121,43 +1121,15 @@ fn binary_info(data: parser.ast.NodeData) ?BinaryInfo {
     return switch (data) {
         .binary_expression => |expression| .{
             .left = expression.left,
-            .precedence = binary_precedence(expression.operator),
+            .precedence = expression.operator.toToken().precedence(),
             .exponent = expression.operator == .exponent,
         },
         .logical_expression => |expression| .{
             .left = expression.left,
-            .precedence = logical_precedence(expression.operator),
+            .precedence = expression.operator.toToken().precedence(),
             .exponent = false,
         },
         else => null,
-    };
-}
-
-fn binary_precedence(operator: parser.ast.BinaryOperator) u8 {
-    return switch (operator) {
-        .exponent => 15,
-        .multiply, .divide, .modulo => 14,
-        .add, .subtract => 13,
-        .left_shift, .right_shift, .unsigned_right_shift => 12,
-        .less_than,
-        .less_than_or_equal,
-        .greater_than,
-        .greater_than_or_equal,
-        .instanceof,
-        .in,
-        => 11,
-        .equal, .not_equal, .strict_equal, .strict_not_equal => 10,
-        .bitwise_and => 9,
-        .bitwise_xor => 8,
-        .bitwise_or => 7,
-    };
-}
-
-fn logical_precedence(operator: parser.ast.LogicalOperator) u8 {
-    return switch (operator) {
-        .@"and" => 6,
-        .@"or" => 5,
-        .nullish_coalescing => 4,
     };
 }
 
