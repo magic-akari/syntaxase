@@ -5,7 +5,7 @@
 	"type": "module",
 	"devDependencies": {
 		"@dprint/biome": "0.14.0",
-		"@dprint/markdown": "0.26.0",
+		"@dprint/markdown": "0.28.0",
 		"dprint-plugin-yaml": "0.6.0"
 	}
 }
