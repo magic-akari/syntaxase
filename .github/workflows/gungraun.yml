@@ -29,7 +29,7 @@ jobs:
                   persist-credentials: false
             - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
               with:
-                  version: 2026.10.11
+                  version: 2026.10.18
             - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
               with:
                   toolchain: 1.99.1
