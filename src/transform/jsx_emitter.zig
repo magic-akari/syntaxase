@@ -21,21 +21,16 @@ const SourceFile = source_file.SourceFile;
 
 const CommentsRange = struct { start: u32, end: u32 };
 
-const EmittedAttribute = struct {
-    content: RuntimeFragment,
-    is_key: bool,
-    is_spread: bool,
-};
+const AttributeMode = enum { properties, automatic };
 
 const EmittedAttributes = struct {
     allocator: Allocator,
-    entries: std.ArrayList(EmittedAttribute) = .empty,
-    has_key_after_spread: bool = false,
+    entries: std.ArrayList(RuntimeFragment) = .empty,
     key: ?RuntimeFragment = null,
     trailing_comments: CommentsRange,
 
     fn deinit(self: *EmittedAttributes) void {
-        for (self.entries.items) |*entry| entry.content.deinit();
+        for (self.entries.items) |*entry| entry.deinit();
         self.entries.deinit(self.allocator);
         if (self.key) |*key| key.deinit();
     }
@@ -175,7 +170,7 @@ pub const Emitter = struct {
                 const opening = self.file.tree.data(element.opening_element).jsx_opening_element;
                 var element_type = try self.emit_element_type(opening.name);
                 defer element_type.deinit();
-                var attributes = try self.emit_attributes(element.opening_element, opening);
+                var attributes = try self.emit_attributes(element.opening_element, opening, .properties);
                 defer attributes.deinit();
                 try self.append_comments_fragment(
                     &children.comments_after_properties,
@@ -230,10 +225,11 @@ pub const Emitter = struct {
                 const opening = self.file.tree.data(element.opening_element).jsx_opening_element;
                 var element_type = try self.emit_element_type(opening.name);
                 defer element_type.deinit();
-                var attributes = try self.emit_attributes(element.opening_element, opening);
+                const attribute_mode = self.plan_attribute_mode(opening);
+                var attributes = try self.emit_attributes(element.opening_element, opening, attribute_mode);
                 defer attributes.deinit();
 
-                if (attributes.has_key_after_spread) {
+                if (attribute_mode == .properties) {
                     try self.append_comments_fragment(
                         &children.comments_after_properties,
                         attributes.trailing_comments,
@@ -341,10 +337,32 @@ pub const Emitter = struct {
         return result;
     }
 
+    fn plan_attribute_mode(self: *const Emitter, opening: parser.ast.JSXOpeningElement) AttributeMode {
+        // A key after a spread needs createElement; decide before lowering nested values.
+        var has_spread = false;
+        for (self.file.tree.extra(opening.attributes)) |index| {
+            switch (self.file.tree.data(index)) {
+                .jsx_spread_attribute => has_spread = true,
+                .jsx_attribute => |attribute| {
+                    if (!has_spread) continue;
+                    const name = self.file.tree.data(attribute.name);
+                    if (name == .jsx_identifier and std.mem.eql(
+                        u8,
+                        self.file.tree.string(name.jsx_identifier.name),
+                        "key",
+                    )) return .properties;
+                },
+                else => unreachable,
+            }
+        }
+        return .automatic;
+    }
+
     fn emit_attributes(
         self: *Emitter,
         opening_index: NodeIndex,
         opening: parser.ast.JSXOpeningElement,
+        mode: AttributeMode,
     ) Allocator.Error!EmittedAttributes {
         var result: EmittedAttributes = .{
             .allocator = self.allocator,
@@ -352,7 +370,6 @@ pub const Emitter = struct {
         };
         errdefer result.deinit();
         var cursor = self.file.tree.span(opening.name).end;
-        var has_spread = false;
 
         for (self.file.tree.extra(opening.attributes)) |attribute_index| {
             const span = self.file.tree.span(attribute_index);
@@ -375,41 +392,28 @@ pub const Emitter = struct {
                         .start = argument_span.end,
                         .end = span.end,
                     });
-                    try result.entries.append(self.allocator, .{
-                        .content = content,
-                        .is_key = false,
-                        .is_spread = true,
-                    });
-                    has_spread = true;
+                    try result.entries.append(self.allocator, content);
                 },
                 .jsx_attribute => |attribute| {
                     const attribute_name = try self.jsx_name_text(attribute.name);
                     defer self.allocator.free(attribute_name);
+                    const separate_key = mode == .automatic and std.mem.eql(u8, attribute_name, "key");
                     var content = RuntimeFragment.init(self.allocator);
                     errdefer content.deinit();
                     try self.append_comments_fragment(&content, leading);
-                    try append_string_literal(&content, attribute_name);
-                    try content.append_generated(": ");
+                    if (!separate_key) {
+                        try append_string_literal(&content, attribute_name);
+                        try content.append_generated(": ");
+                    }
                     var value = try self.emit_attribute_value(attribute.value);
                     defer value.deinit();
                     try content.append_fragment(&value);
 
-                    const is_key = std.mem.eql(u8, attribute_name, "key");
-                    try result.entries.append(self.allocator, .{
-                        .content = content,
-                        .is_key = is_key,
-                        .is_spread = false,
-                    });
-                    if (is_key) {
+                    if (separate_key) {
                         if (result.key) |*previous| previous.deinit();
-                        var key = RuntimeFragment.init(self.allocator);
-                        errdefer key.deinit();
-                        try self.append_comments_fragment(&key, leading);
-                        var key_value = try self.emit_attribute_value(attribute.value);
-                        defer key_value.deinit();
-                        try key.append_fragment(&key_value);
-                        result.key = key;
-                        result.has_key_after_spread = result.has_key_after_spread or has_spread;
+                        result.key = content;
+                    } else {
+                        try result.entries.append(self.allocator, content);
                     }
                 },
                 else => unreachable,
@@ -640,7 +644,7 @@ pub const Emitter = struct {
 
     fn emit_classic_properties(
         self: *Emitter,
-        entries: []EmittedAttribute,
+        entries: []RuntimeFragment,
         trailing_comments: *RuntimeFragment,
     ) Allocator.Error!RuntimeFragment {
         if (entries.len == 0) {
@@ -655,7 +659,7 @@ pub const Emitter = struct {
         try result.append_generated("{");
         for (entries, 0..) |*entry, index| {
             if (index > 0) try result.append_generated(", ");
-            try result.append_fragment(&entry.content);
+            try result.append_fragment(entry);
         }
         try result.append_fragment(trailing_comments);
         try result.append_generated("}");
@@ -664,7 +668,7 @@ pub const Emitter = struct {
 
     fn emit_automatic_properties(
         self: *Emitter,
-        entries: []EmittedAttribute,
+        entries: []RuntimeFragment,
         children: *EmittedChildren,
         trailing_comments: CommentsRange,
     ) Allocator.Error!RuntimeFragment {
@@ -673,9 +677,8 @@ pub const Emitter = struct {
         try result.append_generated("{");
         var count: usize = 0;
         for (entries) |*entry| {
-            if (entry.is_key) continue;
             if (count > 0) try result.append_generated(", ");
-            try result.append_fragment(&entry.content);
+            try result.append_fragment(entry);
             count += 1;
         }
         if (children.values.items.len > 0) {

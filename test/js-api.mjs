@@ -82,6 +82,78 @@ export function runApiTests({ stripTypes, transform }, label) {
 	const devExecutable = devCode.replace(/^import .* from "react\/jsx-dev-runtime";\n?/m, "");
 	assert.equal(vm.runInNewContext(devExecutable, { _jsxDEV: (_tag, _props, key) => key }), undefined);
 
+	for (const runtime of ["automatic", "development", "classic"]) {
+		const options = {
+			jsx:
+				runtime === "classic"
+					? { runtime: "classic" }
+					: { runtime: "automatic", development: runtime === "development" },
+		};
+		for (const [attributes, automaticEvents, propertyEvents, key] of [
+			[
+				'key={mark("key")} value={mark("value")} {...spread()}',
+				["value", "spread", "get", "key"],
+				["key", "value", "spread", "get"],
+				"key",
+			],
+			[
+				'{...spread()} key={mark("key")} value={mark("value")}',
+				["spread", "get", "key", "value"],
+				["spread", "get", "key", "value"],
+				"key",
+			],
+			[
+				'key={mark("first")} value={mark("value")} key={mark("last")}',
+				["value", "last"],
+				["first", "value", "last"],
+				"last",
+			],
+			[
+				'key={mark("first")} {...spread()} key={mark("last")}',
+				["first", "spread", "get", "last"],
+				["first", "spread", "get", "last"],
+				"last",
+			],
+			[
+				'key={<A key={mark("inner")} value={mark("nested")} />} value={mark("outer")}',
+				["outer", "nested", "inner"],
+				["inner", "nested", "outer"],
+				"inner",
+			],
+		]) {
+			const events = [];
+			const code = transform(`<A ${attributes} />;`, options);
+			const executable = code.replace(/^import .* from "react(?:\/jsx(?:-dev)?-runtime)?";\n?/gm, "");
+			const createElement = (_tag, props) => props?.key;
+			const actual = vm.runInNewContext(executable, {
+				A: "A",
+				React: { createElement },
+				_createElement: createElement,
+				_jsx: (_tag, _props, key) => key,
+				_jsxDEV: (_tag, _props, key) => key,
+				mark: (value) => {
+					events.push(value);
+					return value;
+				},
+				spread: () => {
+					events.push("spread");
+					return {
+						get copied() {
+							events.push("get");
+							return 1;
+						},
+					};
+				},
+			});
+			assert.equal(actual, key, `${runtime}: ${attributes}`);
+			assert.deepEqual(
+				events,
+				runtime === "classic" ? propertyEvents : automaticEvents,
+				`${runtime}: ${attributes}`,
+			);
+		}
+	}
+
 	for (const [source, expected] of [
 		["function f(){return <number>\n42;} f();", 42],
 		["try {throw <number>\n42;} catch(e) {e;}", 42],

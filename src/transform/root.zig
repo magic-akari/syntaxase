@@ -466,6 +466,105 @@ test "automatic JSX helper names handle suffix holes and decoded identifiers" {
     );
 }
 
+test "nested JSX keys stay within a linear allocation budget" {
+    const allocator = std.testing.allocator;
+    const depth = 48;
+    var source: std.ArrayList(u8) = .empty;
+    defer source.deinit(allocator);
+    try source.appendSlice(allocator, "const value = ");
+    for (0..depth) |_| try source.appendSlice(allocator, "<A key={/*key*/");
+    try source.appendSlice(allocator, "0");
+    for (0..depth) |_| try source.appendSlice(allocator, "} />");
+    try source.appendSlice(allocator, ";\n");
+
+    const cases = [_]struct {
+        jsx: JSXConfig,
+        prefix: []const u8,
+        suffix: []const u8,
+        imports: []const u8,
+    }{
+        .{
+            .jsx = .{ .automatic = .{} },
+            .prefix = "_jsx(A, {}, /*key*/",
+            .suffix = ")",
+            .imports = "import { jsx as _jsx } from \"react/jsx-runtime\";\n",
+        },
+        .{
+            .jsx = .{ .automatic = .{ .development = true } },
+            .prefix = "_jsxDEV(A, {}, /*key*/",
+            .suffix = ", false)",
+            .imports = "import { jsxDEV as _jsxDEV } from \"react/jsx-dev-runtime\";\n",
+        },
+        .{
+            .jsx = .{ .classic = .{} },
+            .prefix = "React.createElement(A, {\"key\": /*key*/",
+            .suffix = "})",
+            .imports = "",
+        },
+    };
+    for (cases) |case| {
+        var expected: std.ArrayList(u8) = .empty;
+        defer expected.deinit(allocator);
+        try expected.appendSlice(allocator, "const value = ");
+        for (0..depth) |_| try expected.appendSlice(allocator, case.prefix);
+        try expected.appendSlice(allocator, "0");
+        for (0..depth) |_| try expected.appendSlice(allocator, case.suffix);
+        try expected.appendSlice(allocator, ";\n");
+        try expected.appendSlice(allocator, case.imports);
+
+        const mode: TransformMode = .{ .transform = case.jsx };
+        var file = try SourceFile.parse(allocator, source.items, mode.parse_options());
+        defer file.deinit();
+        try std.testing.expectEqual(@as(usize, 0), file.tree.diagnostics.items.len);
+
+        // Bound lowering allocations so duplicate traversal fails without an exponential test run.
+        var budget = std.testing.FailingAllocator.init(allocator, .{ .fail_index = depth * 128 });
+        const code = try transform_file(budget.allocator(), &file, mode);
+        defer budget.allocator().free(code);
+        try std.testing.expectEqualStrings(expected.items, code);
+    }
+}
+
+test "JSX key planning preserves comments on repeated keys and spread fallback" {
+    const allocator = std.testing.allocator;
+    const source = "const x = <A key={/*first*/<B />} key={/*second*/<C />} />;";
+    const cases = [_]struct { jsx: JSXConfig, expected: []const u8 }{
+        .{
+            .jsx = .{ .automatic = .{} },
+            .expected = "const x = _jsx(A, {}, /*second*/_jsx(C, {}));\n" ++
+                "import { jsx as _jsx } from \"react/jsx-runtime\";",
+        },
+        .{
+            .jsx = .{ .automatic = .{ .development = true } },
+            .expected = "const x = _jsxDEV(A, {}, /*second*/_jsxDEV(C, {}, void 0, false), false);\n" ++
+                "import { jsxDEV as _jsxDEV } from \"react/jsx-dev-runtime\";",
+        },
+        .{
+            .jsx = .{ .classic = .{} },
+            .expected = "const x = React.createElement(A, {\"key\": /*first*/React.createElement(B, null), " ++
+                "\"key\": /*second*/React.createElement(C, null)});",
+        },
+    };
+    for (cases) |case| {
+        var result = try transform(allocator, source, .{ .jsx = case.jsx });
+        defer result.deinit(allocator);
+        try std.testing.expectEqualStrings(case.expected, result.code);
+    }
+
+    var fallback = try transform(
+        allocator,
+        "const x = <A {.../*spread*/props} /*key*/ key={/*value*/<B />} />;",
+        .{ .jsx = .{ .automatic = .{} } },
+    );
+    defer fallback.deinit(allocator);
+    try std.testing.expectEqualStrings(
+        "const x = _createElement(A, {.../*spread*/props, /*key*/\"key\": /*value*/_jsx(B, {})});\n" ++
+            "import { createElement as _createElement } from \"react\";\n" ++
+            "import { jsx as _jsx } from \"react/jsx-runtime\";",
+        fallback.code,
+    );
+}
+
 test "automatic JSX helper metadata preserves collisions sources and import order" {
     const allocator = std.testing.allocator;
     const declarations = "const _jsx = 0, _jsx2 = 0, _jsxs = 0, _jsxDEV = 0, _jsxDEV2 = 0, _Fragment = 0, _createElement = 0;\n";
