@@ -58,6 +58,16 @@ pub const TokenIndex = struct {
         return if (offset < token.span.end) token else null;
     }
 
+    /// The complete UTF-8 scalar beginning at an original source position.
+    pub fn leading_character_span(self: TokenIndex, start: u32) ?Span {
+        if (start >= self.source.len) return null;
+        const length = std.unicode.utf8ByteSequenceLength(self.source[start]) catch return null;
+        const end = start + length;
+        if (end > self.source.len) return null;
+        _ = std.unicode.utf8Decode(self.source[start..end]) catch return null;
+        return .{ .start = start, .end = end };
+    }
+
     pub fn find_first(self: TokenIndex, span: Span, tag: TokenTag) ?Token {
         var iterator = self.iterate(span);
         while (iterator.next()) |token| {
@@ -140,6 +150,16 @@ test "queries distinguish containment, adjacency, trivia, and EOF" {
     try std.testing.expect(tokens.after(end) == null);
     try std.testing.expectEqual(.semicolon, tokens.before(end).?.tag);
     try std.testing.expectEqual(@as(usize, 0), tokens.range(.{ .start = end, .end = end + 1 }).len);
+}
+
+test "character spans cover complete scalars at source boundaries" {
+    const index = TokenIndex.init("A\u{00a0}\u{3000}𝒳", &.{});
+    try std.testing.expectEqualDeep(@as(?Span, .{ .start = 0, .end = 1 }), index.leading_character_span(0));
+    try std.testing.expectEqualDeep(@as(?Span, .{ .start = 1, .end = 3 }), index.leading_character_span(1));
+    try std.testing.expectEqualDeep(@as(?Span, .{ .start = 3, .end = 6 }), index.leading_character_span(3));
+    try std.testing.expectEqualDeep(@as(?Span, .{ .start = 6, .end = 10 }), index.leading_character_span(6));
+    try std.testing.expect(index.leading_character_span(2) == null);
+    try std.testing.expect(index.leading_character_span(10) == null);
 }
 
 test "ranges contain whole tokens and support native tag searches" {

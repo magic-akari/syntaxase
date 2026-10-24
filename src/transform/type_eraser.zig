@@ -880,7 +880,8 @@ const Visitor = struct {
         if (!is_hazardous) return;
 
         const expression_span = ctx.tree.span(expression_index);
-        try self.edits.add_substitution(expression_span.end, .semicolon);
+        const replacement = self.tokens.leading_character_span(expression_span.end) orelse return;
+        try self.edits.add_substitution_range(replacement.start, replacement.end, .semicolon);
     }
 
     fn move_opening_parenthesis_across_multiline_type_parameters(
@@ -3140,6 +3141,13 @@ test "strip preserves directive prologues across statement scopes" {
         "run()\ntype T = number;\ninterface I {}\n(next)();",
         "run()\n;               \n              \n(next)();",
     );
+}
+
+test "strip preserves UTF-16 offsets when substituting Unicode whitespace" {
+    try expect_strip(.ts, "value\u{00a0}as T\n(next)();", "value;    \n(next)();");
+    try expect_strip(.ts, "value\u{3000}as T\n(next)();", "value;    \n(next)();");
+    try expect_strip(.ts, "𝒳\u{3000}as T\n(next)();", "𝒳;    \n(next)();");
+    try expect_strip(.ts, "value\u{00a0}satisfies T\n[next]();", "value;           \n[next]();");
 }
 
 test "strip preserves statement boundaries beyond the recursive walker depth" {

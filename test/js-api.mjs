@@ -16,6 +16,11 @@ export function runApiTests({ stripTypes, transform }, label) {
 	assert.equal(typeof transform("const value: = 1;\n"), "string");
 
 	for (const erase of [stripTypes, transform]) {
+		const unicodeSource = "𝒳\u3000as T\n(next)();";
+		const unicodeOutput = erase(unicodeSource);
+		assert.equal(unicodeOutput, "𝒳;    \n(next)();");
+		assert.equal(unicodeOutput.length, unicodeSource.length);
+
 		const directives = 'function f() { "custom"; type T = number; "use strict"; return this === undefined; } f();';
 		assert.equal(vm.runInNewContext(erase(directives)), false);
 	}
