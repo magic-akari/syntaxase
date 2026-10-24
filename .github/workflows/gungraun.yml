@@ -71,7 +71,6 @@ jobs:
                   # Share workloads; keep internal adapters with the measured revision.
                   git checkout "$COMPARE_SHA" -- \
                     benchmark/corpus.mjs \
-                    benchmark/build_steps.zig \
                     benchmark/prepare.mjs \
                     benchmark/native.zig \
                     benchmark/gungraun
