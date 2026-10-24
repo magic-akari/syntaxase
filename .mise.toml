@@ -1,8 +1,8 @@
 min_version = "2026.8.10"
 
 [tools]
-dprint = "0.63.0"
-node = "24.22.0"
+dprint = "0.64.3"
+node = "24.22.1"
 "npm:napi-zig" = "0.3.1"
 zig = "0.17.0"
 
