@@ -12,10 +12,13 @@ const Allocator = std.mem.Allocator;
 const Ctx = parser.traverser.basic.Ctx;
 const NodeIndex = parser.ast.NodeIndex;
 
-const StatementListCursor = struct {
-    parent: NodeIndex = .null,
-    next_position: usize = 0,
-    previous: NodeIndex = .null,
+const StatementContext = struct {
+    container: NodeIndex = .null,
+    previous_retained: ?parser.ast.Span = null,
+    // An erased item already protects the next item from this predecessor.
+    separated: bool = false,
+    directive_prologue: bool = false,
+    erased: bool = false,
 };
 
 /// Collects the first source-preserving TypeScript erasures directly from the
@@ -50,6 +53,7 @@ fn erase_internal(
         .tokens = tokens,
         .runtime = runtime,
     };
+    defer visitor.outer_statements.deinit(edits.allocator);
     try parser.traverser.basic.traverse(Visitor, tree, &visitor);
 }
 
@@ -57,8 +61,8 @@ const Visitor = struct {
     edits: *fixed_edit_buffer.FixedEditBuffer,
     tokens: token_index.TokenIndex,
     runtime: ?*runtime_transformer.RuntimeFeatureCollection,
-    statement_cursors: [256]StatementListCursor = undefined,
-    initialized_statement_cursors: std.StaticBitSet(256) = .empty,
+    statement: StatementContext = .{},
+    outer_statements: std.ArrayList(StatementContext) = .empty,
 
     pub fn enter_node(
         self: *Visitor,
@@ -67,6 +71,19 @@ const Visitor = struct {
         ctx: *Ctx,
     ) Allocator.Error!Action {
         if (self.runtime) |runtime| try runtime.collect_node(data, index, ctx);
+        if (ctx.path.parent() == self.statement.container) self.statement.erased = false;
+        if (is_statement_list(data)) {
+            if (self.statement.container != .null) {
+                try self.outer_statements.append(self.edits.allocator, self.statement);
+            }
+            self.statement = .{
+                .container = index,
+                .directive_prologue = switch (data) {
+                    .program, .function_body, .ts_module_block => true,
+                    else => false,
+                },
+            };
+        }
         return .proceed;
     }
 
@@ -77,6 +94,15 @@ const Visitor = struct {
         ctx: *Ctx,
     ) void {
         if (self.runtime) |runtime| runtime.exit_node(data, index, ctx);
+        if (is_statement_list(data)) {
+            self.statement = self.outer_statements.pop() orelse .{};
+        }
+        if (ctx.path.parent() != self.statement.container) return;
+        if (!self.statement.erased) {
+            self.statement.previous_retained = ctx.tree.span(index);
+            self.statement.separated = false;
+        }
+        self.statement.directive_prologue = self.statement.directive_prologue and data == .directive;
     }
 
     pub fn enter_ts_type_annotation(
@@ -543,9 +569,13 @@ const Visitor = struct {
     fn erase_whole_node(self: *Visitor, index: NodeIndex, ctx: *Ctx) Allocator.Error!void {
         const span = ctx.tree.span(index);
         try self.edits.add_blank(span.start, span.end);
-        if (!self.needs_semicolon_before_erasure(index, ctx)) return;
-
-        try self.add_statement_separator(span);
+        if (self.needs_semicolon_before_erasure(index, ctx)) {
+            try self.add_statement_separator(span);
+        }
+        if (ctx.path.parent() == self.statement.container) {
+            self.statement.erased = true;
+            self.statement.separated = true;
+        }
     }
 
     fn needs_semicolon_before_erasure(
@@ -557,44 +587,12 @@ const Visitor = struct {
         const parent = ctx.tree.data(parent_index);
         if (is_required_statement_slot(parent, index)) return true;
 
-        const statements = statement_list(ctx.tree, parent) orelse return false;
-        const parent_depth = ctx.path.depth() - 1;
-        if (parent_depth >= self.statement_cursors.len) {
-            return needs_semicolon_before_erasure_slow(index, ctx, self.tokens.source);
-        }
-
-        const cursor = &self.statement_cursors[parent_depth];
-        if (!self.initialized_statement_cursors.isSet(parent_depth)) {
-            cursor.* = .{ .parent = parent_index };
-            self.initialized_statement_cursors.set(parent_depth);
-        } else if (cursor.parent != parent_index) {
-            cursor.* = .{ .parent = parent_index };
-        }
-
-        var previous = cursor.previous;
-        var position = cursor.next_position;
-        while (position < statements.len) : (position += 1) {
-            const statement = statements[position];
-            if (statement == .null) continue;
-            if (statement != index) {
-                previous = statement;
-                continue;
-            }
-
-            cursor.next_position = position + 1;
-            cursor.previous = statement;
-            if (previous != .null) {
-                if (is_erasable_statement(ctx.tree, previous)) return false;
-                const previous_span = ctx.tree.span(previous);
-                return previous_span.end > 0 and
-                    self.tokens.source[previous_span.end - 1] != ';';
-            }
-            return switch (parent) {
-                .program, .function_body, .ts_module_block => true,
-                else => false,
-            };
-        }
-        return needs_semicolon_before_erasure_slow(index, ctx, self.tokens.source);
+        if (parent_index != self.statement.container) return false;
+        if (self.statement.directive_prologue) return true;
+        if (self.statement.separated) return false;
+        const previous = self.statement.previous_retained orelse return false;
+        const last = self.tokens.last(previous) orelse return false;
+        return last.tag != .semicolon;
     }
 
     fn add_statement_separator(
@@ -1144,54 +1142,10 @@ fn is_horizontal_whitespace(byte: u8) bool {
     return byte == ' ' or byte == '\t' or byte == '\x0b' or byte == '\x0c';
 }
 
-fn needs_semicolon_before_erasure_slow(
-    index: NodeIndex,
-    ctx: *Ctx,
-    source: []const u8,
-) bool {
-    const parent_index = ctx.path.parent() orelse return false;
-    const parent = ctx.tree.data(parent_index);
-    if (is_required_statement_slot(parent, index)) return true;
-
-    const statements = statement_list(ctx.tree, parent) orelse return false;
-    var position: ?usize = null;
-    for (statements, 0..) |statement, statement_index| {
-        if (statement == index) {
-            position = statement_index;
-            break;
-        }
-    }
-
-    var cursor = position orelse return false;
-    while (cursor > 0) {
-        cursor -= 1;
-        const previous = statements[cursor];
-        if (previous == .null) continue;
-        if (is_erasable_statement(ctx.tree, previous)) return false;
-
-        const previous_span = ctx.tree.span(previous);
-        if (previous_span.end == 0) return false;
-        return source[previous_span.end - 1] != ';';
-    }
-    return switch (parent) {
-        .program, .function_body, .ts_module_block => true,
+fn is_statement_list(data: parser.ast.NodeData) bool {
+    return switch (data) {
+        .program, .function_body, .block_statement, .class_body, .ts_module_block, .static_block, .switch_case => true,
         else => false,
-    };
-}
-
-fn statement_list(
-    tree: *const parser.ast.Tree,
-    parent: parser.ast.NodeData,
-) ?[]const NodeIndex {
-    return switch (parent) {
-        .program => |node| tree.extra(node.body),
-        .function_body => |node| tree.extra(node.body),
-        .block_statement => |node| tree.extra(node.body),
-        .class_body => |node| tree.extra(node.body),
-        .ts_module_block => |node| tree.extra(node.body),
-        .static_block => |node| tree.extra(node.body),
-        .switch_case => |node| tree.extra(node.consequent),
-        else => null,
     };
 }
 
@@ -1219,34 +1173,6 @@ fn is_inside_runtime_namespace(ctx: *const Ctx) bool {
         }
     }
     return false;
-}
-
-fn is_erasable_statement(tree: *const parser.ast.Tree, index: NodeIndex) bool {
-    return switch (tree.data(index)) {
-        .ts_type_alias_declaration,
-        .ts_interface_declaration,
-        .ts_namespace_export_declaration,
-        .ts_index_signature,
-        .ts_global_declaration,
-        => true,
-        .function => |node| node.type == .ts_declare_function,
-        .class => |node| node.declare,
-        .property_definition => |node| node.declare or node.abstract,
-        .method_definition => |node| node.abstract or switch (tree.data(node.value)) {
-            .function => |function| function.body == .null,
-            else => false,
-        },
-        .variable_declaration => |node| node.declare,
-        .ts_enum_declaration => |node| node.declare,
-        .ts_module_declaration => |node| namespace_semantics.is_type_only_module(tree, node),
-        .ts_import_equals_declaration => |node| node.import_kind == .type,
-        .import_declaration => |node| node.import_kind == .type,
-        .export_named_declaration => |node| node.export_kind == .type or
-            is_whole_type_declaration(tree, node.declaration),
-        .export_default_declaration => |node| is_whole_type_declaration(tree, node.declaration),
-        .export_all_declaration => |node| node.export_kind == .type,
-        else => false,
-    };
 }
 
 fn last_decorator_end(
@@ -3161,4 +3087,73 @@ test "strip: modules.qualified_type_only_import_equals" {
         ";                                    \nrun();",
         1,
     );
+}
+
+test "strip preserves directive prologues across statement scopes" {
+    try expect_strip(
+        .ts,
+        "\"custom\"; type T = number; \"use strict\";",
+        "\"custom\"; ;                \"use strict\";",
+    );
+    try expect_strip(
+        .ts,
+        "'custom';\n'another';\ntype T = number;\ninterface I {}\n'use strict';",
+        "'custom';\n'another';\n;               \n              \n'use strict';",
+    );
+    try expect_strip(
+        .ts,
+        "'use client';\ntype T = number;\n'use server';\nexport {};",
+        "'use client';\n;               \n'use server';\nexport {};",
+    );
+    try expect_strip(
+        .ts,
+        "function f() { \"custom\"; type T = number; \"use strict\"; }",
+        "function f() { \"custom\"; ;                \"use strict\"; }",
+    );
+    try expect_strip(
+        .ts,
+        "const f = function () { 'custom'; interface I {} 'use strict'; };",
+        "const f = function () { 'custom'; ;              'use strict'; };",
+    );
+    try expect_strip(
+        .ts,
+        "const f = () => { 'custom'; 'another'; type T = number; 'use strict'; };",
+        "const f = () => { 'custom'; 'another'; ;                'use strict'; };",
+    );
+    try expect_strip(
+        .ts,
+        "class C { method() { 'custom'; type T = number; 'use strict'; } }",
+        "class C { method() { 'custom'; ;                'use strict'; } }",
+    );
+    try expect_strip(
+        .ts,
+        "function f() { 'custom'; run(); type T = number; 'use strict'; }",
+        "function f() { 'custom'; run();                  'use strict'; }",
+    );
+    try expect_strip(
+        .ts,
+        "{ 'custom'; type T = number; 'use strict'; }",
+        "{ 'custom';                  'use strict'; }",
+    );
+    try expect_strip(
+        .ts,
+        "run()\ntype T = number;\ninterface I {}\n(next)();",
+        "run()\n;               \n              \n(next)();",
+    );
+}
+
+test "strip preserves statement boundaries beyond the recursive walker depth" {
+    const allocator = std.testing.allocator;
+    var original: std.ArrayList(u8) = .empty;
+    defer original.deinit(allocator);
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(allocator);
+    const depth = 300;
+    try original.appendNTimes(allocator, '{', depth);
+    try expected.appendNTimes(allocator, '{', depth);
+    try original.appendSlice(allocator, "foo\ntype T = string;\n(next)();");
+    try expected.appendSlice(allocator, "foo\n;               \n(next)();");
+    try original.appendNTimes(allocator, '}', depth);
+    try expected.appendNTimes(allocator, '}', depth);
+    try expect_strip(.ts, original.items, expected.items);
 }

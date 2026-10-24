@@ -15,6 +15,11 @@ export function runApiTests({ stripTypes, transform }, label) {
 	assert.equal(transform('const 名称: string = "🙂";\n'), 'const 名称         = "🙂";\n');
 	assert.equal(typeof transform("const value: = 1;\n"), "string");
 
+	for (const erase of [stripTypes, transform]) {
+		const directives = 'function f() { "custom"; type T = number; "use strict"; return this === undefined; } f();';
+		assert.equal(vm.runInNewContext(erase(directives)), false);
+	}
+
 	assert.equal(
 		transform("const element = <div />;\n", { jsx: true }),
 		'const element = _jsx("div", {});\n' + 'import { jsx as _jsx } from "react/jsx-runtime";\n',
