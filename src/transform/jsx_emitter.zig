@@ -740,13 +740,7 @@ pub const Emitter = struct {
         result: *RuntimeFragment,
         range: CommentsRange,
     ) Allocator.Error!void {
-        if (range.start >= range.end) return;
-        var output: std.ArrayList(u8) = .empty;
-        errdefer output.deinit(self.allocator);
-        const cursor = self.file.comment_cursor();
-        try cursor.append_range(&output, self.allocator, range.start, range.end);
-        const owned = try output.toOwnedSlice(self.allocator);
-        try result.append_owned_generated(owned);
+        try result.append_comments(&self.file.tree, range.start, range.end);
     }
 
     fn automatic_helper(

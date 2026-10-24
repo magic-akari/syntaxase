@@ -653,6 +653,23 @@ test "classic JSX uses custom factory fragment and spread children" {
     );
 }
 
+test "reordered JSX key comments preserve line endings" {
+    const allocator = std.testing.allocator;
+    const source = "const x = <A key={//key\n <B key={/*inner*/1} />//tail\n} other={//prop\n2//end\n} />;";
+    const expected = "const x = _jsx(A, {\"other\": //prop\n2//end\n}, //key\n_jsx(B, {}, /*inner*/1)//tail\n);\n" ++
+        "import { jsx as _jsx } from \"react/jsx-runtime\";";
+    for ([_][]const u8{ "\n", "\r\n", "\r", "\u{2028}", "\u{2029}" }) |ending| {
+        const input = try std.mem.replaceOwned(u8, allocator, source, "\n", ending);
+        defer allocator.free(input);
+        const output = try std.mem.replaceOwned(u8, allocator, expected, "\n", ending);
+        defer allocator.free(output);
+        var result = try transform(allocator, input, .{ .jsx = .{ .automatic = .{} } });
+        defer result.deinit(allocator);
+        try std.testing.expectEqual(@as(usize, 0), result.diagnostics.len);
+        try std.testing.expectEqualStrings(output, result.code);
+    }
+}
+
 test "development JSX always emits jsxDEV metadata arguments" {
     const allocator = std.testing.allocator;
     const source = "const element = <div><A /><B /></div>;\n";

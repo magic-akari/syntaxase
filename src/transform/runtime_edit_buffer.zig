@@ -1,4 +1,6 @@
 const std = @import("std");
+const parser = @import("parser");
+const comment_cursor = @import("comment_cursor.zig");
 const fixed_edit_buffer = @import("fixed_edit_buffer.zig");
 const source_layout = @import("source_layout.zig");
 const unicode = @import("unicode.zig");
@@ -11,12 +13,19 @@ pub const Span = struct {
     end: u32,
 };
 
+const CommentRange = struct {
+    tree: *const parser.ast.Tree,
+    span: Span,
+};
+
 pub const FragmentPiece = union(enum) {
     /// Borrowed generated text. Runtime fragments never outlive the source,
     /// transform options, or generated-name allocator they borrow from.
     generated: []const u8,
     /// Dynamically formatted generated text owned by the fragment.
     owned_generated: []u8,
+    /// Borrowed comments rendered as generated text, suppressing child edits.
+    comments: CommentRange,
     original: Span,
     /// Zero-width marker used by layout-aware runtime emitters. The renderer
     /// aligns generated content with this original source position.
@@ -28,7 +37,8 @@ pub const FragmentPiece = union(enum) {
 
 /// Structured runtime output. Static generated pieces borrow their text,
 /// dynamically generated pieces own it, and original pieces retain source
-/// provenance. This lets nested runtime replacements compose without copying
+/// provenance. Comment ranges borrow the parser tree until rendering.
+/// This lets nested runtime replacements compose without copying
 /// every punctuation token into a separate allocation.
 pub const RuntimeFragment = struct {
     allocator: Allocator,
@@ -41,7 +51,7 @@ pub const RuntimeFragment = struct {
     pub fn deinit(self: *RuntimeFragment) void {
         for (self.pieces.items) |piece| switch (piece) {
             .owned_generated => |text| self.allocator.free(text),
-            .generated, .original, .line_head, .source_padding => {},
+            .generated, .comments, .original, .line_head, .source_padding => {},
         };
         self.pieces.deinit(self.allocator);
     }
@@ -49,6 +59,22 @@ pub const RuntimeFragment = struct {
     pub fn append_generated(self: *RuntimeFragment, text: []const u8) Allocator.Error!void {
         if (text.len == 0) return;
         try self.pieces.append(self.allocator, .{ .generated = text });
+    }
+
+    /// Borrows the tree until rendering. One piece represents the whole range,
+    /// including comments separated by whitespace that must not be emitted.
+    pub fn append_comments(
+        self: *RuntimeFragment,
+        tree: *const parser.ast.Tree,
+        start: u32,
+        end: u32,
+    ) Allocator.Error!void {
+        var chunks = comment_cursor.CommentCursor.init(tree.source, tree.comments).iterate(start, end);
+        if (chunks.next() == null) return;
+        try self.pieces.append(self.allocator, .{ .comments = .{
+            .tree = tree,
+            .span = .{ .start = start, .end = end },
+        } });
     }
 
     /// Takes ownership of `owned_text` only when this call succeeds.
@@ -74,7 +100,7 @@ pub const RuntimeFragment = struct {
                     previous.* = .{ .original = .{ .start = span.start, .end = end } };
                     return;
                 },
-                .generated, .owned_generated => {},
+                .generated, .owned_generated, .comments => {},
                 .line_head, .source_padding => {},
             }
         }
@@ -285,6 +311,7 @@ pub const RuntimeEditBuffer = struct {
         for (pieces) |piece| switch (piece) {
             .generated => |text| try self.append_tracked(output, output_allocator, text),
             .owned_generated => |text| try self.append_tracked(output, output_allocator, text),
+            .comments => |range| try self.append_comments(output, output_allocator, range),
             .line_head, .source_padding => |anchor| try self.align_to_source(
                 output,
                 output_allocator,
@@ -362,6 +389,7 @@ pub const RuntimeEditBuffer = struct {
         for (replacement.fragment.pieces.items) |piece| switch (piece) {
             .generated => |text| try self.append_tracked(output, output_allocator, text),
             .owned_generated => |text| try self.append_tracked(output, output_allocator, text),
+            .comments => |range| try self.append_comments(output, output_allocator, range),
             .line_head, .source_padding => |anchor| try self.align_to_source(
                 output,
                 output_allocator,
@@ -417,6 +445,23 @@ pub const RuntimeEditBuffer = struct {
     ) Allocator.Error!void {
         try output.appendSlice(output_allocator, text);
         self.track_appended(text);
+    }
+
+    fn append_comments(
+        self: *RuntimeEditBuffer,
+        output: *std.ArrayList(u8),
+        output_allocator: Allocator,
+        range: CommentRange,
+    ) Allocator.Error!void {
+        const output_start = output.items.len;
+        const comments = comment_cursor.CommentCursor.init(range.tree.source, range.tree.comments);
+        try comments.append_range(
+            output,
+            output_allocator,
+            range.span.start,
+            range.span.end,
+        );
+        self.track_appended(output.items[output_start..]);
     }
 
     fn align_to_source(
@@ -662,4 +707,51 @@ test "structured fragments apply nested replacements only in original pieces" {
     const output = try runtime.render();
     defer allocator.free(output);
     try std.testing.expectEqualStrings("before wrap(inner   ) after", output);
+}
+
+test "dense comment ranges use constant fragment storage" {
+    const allocator = std.testing.allocator;
+    var source: std.ArrayList(u8) = .empty;
+    defer source.deinit(allocator);
+    for (0..1024) |_| try source.appendSlice(allocator, "/* comment */ ");
+    var tree = try parser.parse(allocator, source.items, .{ .comments = .collect });
+    defer tree.deinit();
+
+    var budget = std.testing.FailingAllocator.init(allocator, .{ .fail_index = 1 });
+    var fragment = RuntimeFragment.init(budget.allocator());
+    defer fragment.deinit();
+    try fragment.append_comments(&tree, 0, @intCast(source.items.len));
+    try std.testing.expectEqual(@as(usize, 1), fragment.pieces.items.len);
+    try std.testing.expect(budget.allocated_bytes < source.items.len);
+}
+
+test "comment fragments preserve generated text semantics in flat and nested rendering" {
+    const allocator = std.testing.allocator;
+    const source = "/* first */ // line\r\n /* last */";
+    var tree = try parser.parse(allocator, source, .{ .comments = .collect });
+    defer tree.deinit();
+    var fixed_edits = fixed_edit_buffer.FixedEditBuffer.init(allocator, source);
+    defer fixed_edits.deinit();
+    try fixed_edits.add_blank(0, @intCast(source.len));
+    var fixed = try fixed_edits.seal();
+    defer fixed.deinit();
+
+    for ([_]bool{ false, true }) |nested| {
+        var runtime = RuntimeEditBuffer.init(allocator, &fixed);
+        defer runtime.deinit();
+        var fragment = RuntimeFragment.init(allocator);
+        defer fragment.deinit();
+        try fragment.append_comments(&tree, 0, @intCast(source.len));
+        try runtime.add_fragment(0, @intCast(source.len), fragment);
+        fragment = RuntimeFragment.init(allocator);
+        if (nested) {
+            const first = tree.comments[0].span;
+            try runtime.add_replacement(first.start, first.end, "suppressed child");
+        }
+
+        const output = try runtime.render();
+        defer allocator.free(output);
+        try std.testing.expectEqualStrings("/* first */// line\r\n/* last */", output);
+        try std.testing.expectEqual(@as(usize, 1), runtime.render_line);
+    }
 }
