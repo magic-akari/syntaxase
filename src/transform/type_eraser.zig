@@ -1659,6 +1659,15 @@ fn expect_strip(
     original: []const u8,
     expected: []const u8,
 ) !void {
+    try expect_strip_with_diagnostics(lang, original, expected, 0);
+}
+
+fn expect_strip_with_diagnostics(
+    lang: parser.ast.Lang,
+    original: []const u8,
+    expected: []const u8,
+    expected_diagnostics: usize,
+) !void {
     const allocator = std.testing.allocator;
     var tree = try parser.parse(allocator, original, .{
         .lang = lang,
@@ -1666,6 +1675,7 @@ fn expect_strip(
         .tokens = true,
     });
     defer tree.deinit();
+    try std.testing.expectEqual(expected_diagnostics, tree.diagnostics.items.len);
 
     var edits = fixed_edit_buffer.FixedEditBuffer.init(allocator, original);
     defer edits.deinit();
@@ -1678,6 +1688,12 @@ fn expect_strip(
         unicode.utf16_width(original),
         unicode.utf16_width(output),
     );
+    var reparsed = try parser.parse(allocator, output, .{
+        .lang = if (lang == .tsx) .jsx else .js,
+        .comments = .none,
+    });
+    defer reparsed.deinit();
+    try std.testing.expectEqual(@as(usize, 0), reparsed.diagnostics.items.len);
 }
 
 test "strip: annotations.variable_type_annotation" {
@@ -3139,9 +3155,10 @@ test "strip: modules.exported_type_alias_declaration" {
 }
 
 test "strip: modules.qualified_type_only_import_equals" {
-    try expect_strip(
+    try expect_strip_with_diagnostics(
         .ts,
         "import type Alias = Namespace.Member;\nrun();",
         ";                                    \nrun();",
+        1,
     );
 }
