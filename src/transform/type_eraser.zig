@@ -902,8 +902,6 @@ const Visitor = struct {
         try self.erase_suffix_expression(expression_index, wrapper_index, ctx);
 
         const wrapper_span = ctx.tree.span(wrapper_index);
-        if (!self.ends_containing_statement(wrapper_span, ctx)) return;
-
         const next = self.tokens.after(wrapper_span.end) orelse return;
         if (!next.hasLineTerminatorBefore()) return;
 
@@ -912,6 +910,7 @@ const Visitor = struct {
             else => false,
         };
         if (!is_hazardous) return;
+        if (!self.ends_containing_statement(wrapper_span, ctx)) return;
 
         const expression_span = ctx.tree.span(expression_index);
         const replacement = self.tokens.leading_character_span(expression_span.end) orelse return;
@@ -1109,10 +1108,10 @@ fn assertion_would_change_binary_grouping(
     wrapper_index: NodeIndex,
     ctx: *Ctx,
 ) bool {
-    const expression = asserted_binary_info(ctx.tree, expression_index) orelse return false;
     const parent_index = ctx.path.parent() orelse return false;
     const parent = binary_info(ctx.tree.data(parent_index)) orelse return false;
     if (parent.left != wrapper_index) return false;
+    const expression = asserted_binary_info(ctx.tree, expression_index) orelse return false;
 
     if (parent.precedence > expression.precedence) return true;
     return parent.precedence == expression.precedence and
@@ -2744,6 +2743,14 @@ test "strip: expressions.unary_assertion_left_of_exponentiation" {
     );
 }
 
+test "strip preserves exponentiation grouping across nested assertions" {
+    try expect_strip(
+        .ts,
+        "const value = 2 * 3 as A as B ** 2;",
+        "const value =(2 * 3         ) ** 2;",
+    );
+}
+
 test "strip: expressions.regular_expression_text_is_not_erased" {
     try expect_strip(
         .ts,
@@ -3180,6 +3187,46 @@ test "strip erases namespaces containing only explicit type exports or ambient c
     try expect_strip(.ts, nested_ambient, ";" ++ @as([nested_ambient.len - 1]u8, @splat(' ')));
     const inherited_ambient = "namespace N { declare namespace M { namespace K { const enum E { A } } } }";
     try expect_strip(.ts, inherited_ambient, ";" ++ @as([inherited_ambient.len - 1]u8, @splat(' ')));
+}
+
+fn expect_repeated_chain(link: []const u8, replacement: []const u8, count: usize) !void {
+    const allocator = std.testing.allocator;
+    var original: std.ArrayList(u8) = .empty;
+    defer original.deinit(allocator);
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(allocator);
+    try original.ensureTotalCapacity(allocator, 6 + link.len * count);
+    try expected.ensureTotalCapacity(allocator, 6 + replacement.len * count);
+    original.appendSliceAssumeCapacity("x = a");
+    expected.appendSliceAssumeCapacity("x = a");
+    for (0..count) |_| {
+        original.appendSliceAssumeCapacity(link);
+        expected.appendSliceAssumeCapacity(replacement);
+    }
+    original.appendAssumeCapacity(';');
+    expected.appendAssumeCapacity(';');
+    try expect_strip(.ts, original.items, expected.items);
+}
+
+test "strip handles long expression chains on a small stack" {
+    const Runner = struct {
+        fn check() !void {
+            try expect_repeated_chain(" as any", "       ", 50_000);
+            try expect_repeated_chain(" satisfies any", "              ", 50_000);
+            try expect_repeated_chain("!", " ", 50_000);
+            try expect_repeated_chain(".b", ".b", 50_000);
+            try expect_repeated_chain("+a", "+a", 50_000);
+            try expect_repeated_chain("<T>(b!)[c as C]?.d!", "   (b )[c     ]?.d ", 5_000);
+        }
+
+        fn run(result: *anyerror!void) void {
+            result.* = check();
+        }
+    };
+    var result: anyerror!void = undefined;
+    const thread = try std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, Runner.run, .{&result});
+    thread.join();
+    try result;
 }
 
 test "strip preserves statement boundaries beyond the recursive walker depth" {

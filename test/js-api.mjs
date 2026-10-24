@@ -23,6 +23,7 @@ export function runApiTests({ stripTypes, transform }, label) {
 
 		const directives = 'function f() { "custom"; type T = number; "use strict"; return this === undefined; } f();';
 		assert.equal(vm.runInNewContext(erase(directives)), false);
+		assert.equal(vm.runInNewContext(erase("const value = 2 * 3 as A as B ** 2; value;")), 36);
 	}
 	const namespaceSource = "namespace N { declare const enum E { A } }";
 	assert.equal(stripTypes(namespaceSource), ";" + " ".repeat(namespaceSource.length - 1));
