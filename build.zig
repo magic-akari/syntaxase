@@ -120,6 +120,30 @@ pub fn build(b: *std.Build) void {
     const smoke_test_step = b.step("test-smoke", "Run public API smoke tests");
     smoke_test_step.dependOn(&run_smoke_tests.step);
 
+    // Stack budgets cover release builds; Debug walker frames are much larger.
+    const stack_yuku = b.dependency("yuku", .{
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    const stack_parser = stack_yuku.module("parser");
+    const stack_syntaxase = b.createModule(.{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    stack_syntaxase.addImport("parser", stack_parser);
+    stack_syntaxase.addImport("yuku_util", stack_parser.import_table.get("util").?);
+    const stack_test_module = b.createModule(.{
+        .root_source_file = b.path("test/stack.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    stack_test_module.addImport("syntaxase", stack_syntaxase);
+    const stack_tests = b.addTest(.{ .root_module = stack_test_module });
+    const run_stack_tests = b.addRunArtifact(stack_tests);
+    const stack_test_step = b.step("test-stack", "Run public API stack-budget tests in ReleaseFast");
+    stack_test_step.dependOn(&run_stack_tests.step);
+
     const integration_test_module = b.createModule(.{
         .root_source_file = b.path("test/integration.zig"),
         .target = target,
@@ -140,6 +164,7 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run all native Zig correctness tests");
     test_step.dependOn(&run_unit_tests.step);
     test_step.dependOn(&run_smoke_tests.step);
+    test_step.dependOn(&run_stack_tests.step);
     test_step.dependOn(&run_integration_tests.step);
 
     benchmark.add(b, target);

@@ -95,6 +95,8 @@ mise run test:wasm
 
 - Module-level tests live beside their Zig implementation.
 - `test/smoke.zig` exercises the public native API.
+- `test/stack.zig` checks public APIs with a 1 MiB thread stack in ReleaseFast;
+  correctness tests retain the selected build mode, including Debug.
 - `test/integration.zig` checks the committed fixture corpus byte for byte.
 - `test/js-api.mjs` defines the shared JavaScript API contract.
 - `test/napi.mjs` and `test/wasm.mjs` run that contract against each boundary.

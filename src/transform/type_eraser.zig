@@ -3208,25 +3208,13 @@ fn expect_repeated_chain(link: []const u8, replacement: []const u8, count: usize
     try expect_strip(.ts, original.items, expected.items);
 }
 
-test "strip handles long expression chains on a small stack" {
-    const Runner = struct {
-        fn check() !void {
-            try expect_repeated_chain(" as any", "       ", 50_000);
-            try expect_repeated_chain(" satisfies any", "              ", 50_000);
-            try expect_repeated_chain("!", " ", 50_000);
-            try expect_repeated_chain(".b", ".b", 50_000);
-            try expect_repeated_chain("+a", "+a", 50_000);
-            try expect_repeated_chain("<T>(b!)[c as C]?.d!", "   (b )[c     ]?.d ", 5_000);
-        }
-
-        fn run(result: *anyerror!void) void {
-            result.* = check();
-        }
-    };
-    var result: anyerror!void = undefined;
-    const thread = try std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, Runner.run, .{&result});
-    thread.join();
-    try result;
+test "strip handles long expression chains" {
+    try expect_repeated_chain(" as any", "       ", 50_000);
+    try expect_repeated_chain(" satisfies any", "              ", 50_000);
+    try expect_repeated_chain("!", " ", 50_000);
+    try expect_repeated_chain(".b", ".b", 50_000);
+    try expect_repeated_chain("+a", "+a", 50_000);
+    try expect_repeated_chain("<T>(b!)[c as C]?.d!", "   (b )[c     ]?.d ", 5_000);
 }
 
 test "strip preserves statement boundaries beyond the recursive walker depth" {
