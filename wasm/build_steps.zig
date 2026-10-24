@@ -24,7 +24,6 @@ pub fn add(b: *std.Build) void {
         .strip = true,
     });
     syntaxase.addImport("parser", yuku_parser);
-    syntaxase.addImport("yuku_util", yuku_parser.import_table.get("util").?);
 
     const normalized_transform = b.createModule(.{
         .root_source_file = b.path("src/ffi/normalized_transform.zig"),

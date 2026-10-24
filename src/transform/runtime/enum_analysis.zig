@@ -319,6 +319,12 @@ pub fn member_name(tree: *const parser.ast.Tree, member: parser.ast.TSEnumMember
     return switch (tree.data(member.id)) {
         .identifier_name => |node| tree.string(node.name),
         .string_literal => |node| tree.string(node.value),
+        .template_literal => |node| blk: {
+            if (node.expressions.len != 0 or node.quasis.len != 1) break :blk null;
+            const element = tree.data(tree.extra(node.quasis)[0]).template_element;
+            if (element.is_cooked_undefined) break :blk null;
+            break :blk tree.string(element.cooked);
+        },
         else => null,
     };
 }

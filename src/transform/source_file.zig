@@ -17,7 +17,7 @@ pub const SourceFile = struct {
 
     pub const ParseOptions = struct {
         lang: parser.ast.Lang,
-        comments: parser.CommentMode = .flat,
+        comments: parser.CommentMode = .collect,
     };
 
     pub fn parse(

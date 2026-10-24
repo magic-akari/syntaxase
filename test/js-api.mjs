@@ -178,6 +178,13 @@ export function runApiTests({ stripTypes, transform }, label) {
 		["let calls=0; function get(){calls++;return 9;} enum E { A=get() } [calls,E.A,E[9]];", [1, 9, "A"]],
 		['enum E { A="A" } function f(){const E={A:2};enum F{B=E.A}return [F.B,(F as any)[2]];} f();', [2, "B"]],
 		['enum E { "A B" = ("text") } E["A B"];', "text"],
+		[
+			'enum E { "$"=1, "_"=2, "类"=3, "𝒳"=4, "a\\u200c"=5, "1a"=6, "😀"=7 } [E.$, E._, E.类, E.𝒳, E["a\\u200c"], E["1a"], E["😀"]];',
+			[1, 2, 3, 4, 5, 6, 7],
+		],
+		['enum E { ["A"] = 1, [`B`] = A + 1, C = B + 1 } [E.A, E.B, E.C];', [1, 2, 3]],
+		['enum E { [`\\u0041`] = "text" } enum E { B = A } [E.A, E.B];', ["text", "text"]],
+		["enum E { [`A`] = 1, B = (() => A + 1)() } E.B;", 2],
 	]) {
 		assert.equal(JSON.stringify(vm.runInNewContext(transform(source))), JSON.stringify(expected), source);
 	}

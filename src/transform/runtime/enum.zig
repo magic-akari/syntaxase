@@ -2,7 +2,6 @@ const std = @import("std");
 const declarations = @import("declarations.zig");
 const enum_analysis = @import("enum_analysis.zig");
 const parser = @import("parser");
-const yuku_util = @import("yuku_util");
 const fixed_edit_buffer = @import("../fixed_edit_buffer.zig");
 const runtime_edit_buffer = @import("../runtime_edit_buffer.zig");
 const runtime_name_allocator = @import("../runtime_name_allocator.zig");
@@ -124,8 +123,8 @@ pub fn emit(
     defer natural_names.deinit(allocator);
     for (member_indices) |member_index| {
         const member = enum_member(&file.tree, member_index);
-        if (member_reference_name(&file.tree, member)) |name| {
-            if (member_can_use_reference_local(&file.tree, member)) {
+        if (enum_analysis.member_name(&file.tree, member)) |name| {
+            if (parser.lexical.isIdentifierName(name)) {
                 try natural_names.put(allocator, name, {});
             }
         }
@@ -143,7 +142,7 @@ pub fn emit(
 
     for (member_indices) |member_index| {
         const member = enum_member(&file.tree, member_index);
-        const reference_name = member_reference_name(&file.tree, member);
+        const reference_name = enum_analysis.member_name(&file.tree, member);
         var local: ?[]const u8 = null;
         if (reference_name) |name| {
             if (natural_names.contains(name)) {
@@ -338,28 +337,6 @@ fn enum_member(tree: *const parser.ast.Tree, index: NodeIndex) parser.ast.TSEnum
     return switch (tree.data(index)) {
         .ts_enum_member => |member| member,
         else => unreachable,
-    };
-}
-
-fn member_reference_name(
-    tree: *const parser.ast.Tree,
-    member: parser.ast.TSEnumMember,
-) ?[]const u8 {
-    return switch (tree.data(member.id)) {
-        .identifier_name => |identifier| tree.string(identifier.name),
-        .string_literal => |literal| tree.string(literal.value),
-        else => null,
-    };
-}
-
-fn member_can_use_reference_local(
-    tree: *const parser.ast.Tree,
-    member: parser.ast.TSEnumMember,
-) bool {
-    return switch (tree.data(member.id)) {
-        .identifier_name => true,
-        .string_literal => |literal| is_identifier_name(tree.string(literal.value)),
-        else => false,
     };
 }
 
@@ -642,29 +619,6 @@ const AlignedWriter = struct {
         self.current_column += unicode.utf16_width(text[segment_start..]);
     }
 };
-
-fn is_identifier_name(name: []const u8) bool {
-    if (name.len == 0) return false;
-    var offset: usize = 0;
-    var first = true;
-    while (offset < name.len) {
-        const sequence_len = std.unicode.utf8ByteSequenceLength(name[offset]) catch return false;
-        if (offset + sequence_len > name.len) return false;
-        const codepoint = std.unicode.utf8Decode(name[offset..][0..sequence_len]) catch return false;
-        const valid = if (codepoint < 0x80) blk: {
-            const byte: u8 = @intCast(codepoint);
-            break :blk std.ascii.isAlphabetic(byte) or byte == '_' or byte == '$' or
-                (!first and std.ascii.isDigit(byte));
-        } else if (first)
-            yuku_util.UnicodeId.canStartId(codepoint)
-        else
-            yuku_util.UnicodeId.canContinueId(codepoint);
-        if (!valid) return false;
-        offset += sequence_len;
-        first = false;
-    }
-    return true;
-}
 
 fn is_strict_binding_identifier(name: []const u8) bool {
     return !strict_binding_reserved_words.has(name);

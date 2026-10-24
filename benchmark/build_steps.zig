@@ -16,7 +16,6 @@ pub fn add(
         .optimize = .ReleaseFast,
     });
     syntaxase_benchmark.addImport("parser", yuku_parser);
-    syntaxase_benchmark.addImport("yuku_util", yuku_parser.import_table.get("util").?);
 
     const native_module = b.createModule(.{
         .root_source_file = b.path("benchmark/native.zig"),

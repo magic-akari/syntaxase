@@ -53,7 +53,7 @@ pub const CommentCursor = struct {
 test "comment cursor starts at the requested range" {
     const allocator = std.testing.allocator;
     const source = "/* before */ const a = 1; // keep\nconst b = 2;";
-    var tree = try parser.parse(allocator, source, .{ .comments = .flat });
+    var tree = try parser.parse(allocator, source, .{ .comments = .collect });
     defer tree.deinit();
 
     const cursor = CommentCursor.init(source, tree.comments);

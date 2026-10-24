@@ -699,15 +699,17 @@ test "enum lowering aliases duplicate references using Yuku identifier nodes" {
     );
 }
 
-test "enum local planning uses Yuku Unicode identifier tables" {
+test "enum local planning uses Yuku lexical identifier rules" {
     const allocator = std.testing.allocator;
-    const source = "enum E { \"类\" = 1, \"😀\" = 2 }\n";
+    const source = "enum E { \"类\" = 1, \"𝒳\" = 2, \"a\u{200c}\" = 3, \"1a\" = 4, \"😀\" = 5 }\n";
     var result = try transform(allocator, source, .{});
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings(
         "var  E;(function(E){const 类=1;E[E[\"类\"]=类]=\"类\";" ++
-            "E[E[\"😀\"]=2]=\"😀\";})(E||(E={}));\n",
+            "const 𝒳=2;E[E[\"𝒳\"]=𝒳]=\"𝒳\";" ++
+            "const a\u{200c}=3;E[E[\"a\u{200c}\"]=a\u{200c}]=\"a\u{200c}\";" ++
+            "E[E[\"1a\"]=4]=\"1a\";E[E[\"😀\"]=5]=\"😀\";})(E||(E={}));\n",
         result.code,
     );
 }

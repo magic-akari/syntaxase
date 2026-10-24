@@ -1255,7 +1255,7 @@ test "eraser uses native spans for type syntax" {
     const source = "function id<T>(value: T): T { return id<string>(value); }\n";
     var tree = try parser.parse(allocator, source, .{
         .lang = .ts,
-        .comments = .flat,
+        .comments = .collect,
         .tokens = true,
     });
     defer tree.deinit();
@@ -1283,7 +1283,7 @@ test "eraser removes whole type-only declarations" {
     ;
     var tree = try parser.parse(allocator, source, .{
         .lang = .ts,
-        .comments = .flat,
+        .comments = .collect,
         .tokens = true,
     });
     defer tree.deinit();
@@ -1314,7 +1314,7 @@ test "whole-node erasure preserves an ASI statement boundary" {
     ;
     var tree = try parser.parse(allocator, source, .{
         .lang = .ts,
-        .comments = .flat,
+        .comments = .collect,
         .tokens = true,
     });
     defer tree.deinit();
@@ -1346,7 +1346,7 @@ test "type-only namespaces erase while runtime namespaces remain for lowering" {
     ;
     var tree = try parser.parse(allocator, source, .{
         .lang = .ts,
-        .comments = .flat,
+        .comments = .collect,
         .tokens = true,
     });
     defer tree.deinit();
@@ -1385,7 +1385,7 @@ test "eraser removes native class TypeScript syntax and ambient declarations" {
     ;
     var tree = try parser.parse(allocator, source, .{
         .lang = .ts,
-        .comments = .flat,
+        .comments = .collect,
         .tokens = true,
     });
     defer tree.deinit();
@@ -1422,7 +1422,7 @@ test "eraser removes parameter and binding-only syntax" {
     ;
     var tree = try parser.parse(allocator, source, .{
         .lang = .ts,
-        .comments = .flat,
+        .comments = .collect,
         .tokens = true,
     });
     defer tree.deinit();
@@ -1461,7 +1461,7 @@ test "eraser removes type-only import and export list items" {
     ;
     var tree = try parser.parse(allocator, source, .{
         .lang = .ts,
-        .comments = .flat,
+        .comments = .collect,
         .tokens = true,
     });
     defer tree.deinit();
@@ -1491,7 +1491,7 @@ test "eraser removes expression-level TypeScript wrappers" {
     ;
     var tree = try parser.parse(allocator, source, .{
         .lang = .ts,
-        .comments = .flat,
+        .comments = .collect,
         .tokens = true,
     });
     defer tree.deinit();
@@ -1516,7 +1516,7 @@ test "suffix assertions preserve ASI boundaries" {
     const source = "value as string\n(next)();\n";
     var tree = try parser.parse(allocator, source, .{
         .lang = .ts,
-        .comments = .flat,
+        .comments = .collect,
         .tokens = true,
     });
     defer tree.deinit();
@@ -1539,7 +1539,7 @@ test "suffix assertions retain grouping on the left of exponentiation" {
     ;
     var tree = try parser.parse(allocator, source, .{
         .lang = .ts,
-        .comments = .flat,
+        .comments = .collect,
         .tokens = true,
     });
     defer tree.deinit();
@@ -1570,7 +1570,7 @@ test "multiline arrow corrections remain valid JavaScript" {
     ;
     var tree = try parser.parse(allocator, source, .{
         .lang = .ts,
-        .comments = .flat,
+        .comments = .collect,
         .tokens = true,
     });
     defer tree.deinit();
@@ -1612,7 +1612,7 @@ fn expect_strip_with_diagnostics(
     const allocator = std.testing.allocator;
     var tree = try parser.parse(allocator, original, .{
         .lang = lang,
-        .comments = .flat,
+        .comments = .collect,
         .tokens = true,
     });
     defer tree.deinit();

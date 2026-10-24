@@ -34,8 +34,6 @@ pub fn build(b: *std.Build) void {
     });
     const yuku_parser = yuku.module("parser");
     syntaxase.addImport("parser", yuku_parser);
-    const yuku_util = yuku_parser.import_table.get("util").?;
-    syntaxase.addImport("yuku_util", yuku_util);
 
     const normalized_transform = b.createModule(.{
         .root_source_file = b.path("src/ffi/normalized_transform.zig"),
@@ -132,7 +130,6 @@ pub fn build(b: *std.Build) void {
         .optimize = .ReleaseFast,
     });
     stack_syntaxase.addImport("parser", stack_parser);
-    stack_syntaxase.addImport("yuku_util", stack_parser.import_table.get("util").?);
     const stack_test_module = b.createModule(.{
         .root_source_file = b.path("test/stack.zig"),
         .target = target,
