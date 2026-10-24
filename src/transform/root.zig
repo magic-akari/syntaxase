@@ -801,6 +801,23 @@ test "transform lowers a native Yuku enum while stripTypes does not" {
     try std.testing.expectEqualStrings(source, stripped.code);
 }
 
+test "enum comments preserve alignment and line endings around initializers" {
+    const allocator = std.testing.allocator;
+    const source = "enum E {\n//first\nA//before\n=//value\n1,//after\nB,//last\nC=B+1//end\n}\nE.C;";
+    const expected = "var  E;(function(E){//first\n\nconst A=//before\n//value\n1;E[E[\"A\"]=A]=\"A\";//after\n" ++
+        "const B = A + 1;E[E[\"B\"]=B]=\"B\";//last\nconst C=B+1;E[E[\"C\"]=C]=\"C\";//end\n})(E||(E={}));\nE.C;";
+    for ([_][]const u8{ "\n", "\r\n", "\r", "\u{2028}", "\u{2029}" }) |ending| {
+        const input = try std.mem.replaceOwned(u8, allocator, source, "\n", ending);
+        defer allocator.free(input);
+        const output = try std.mem.replaceOwned(u8, allocator, expected, "\n", ending);
+        defer allocator.free(output);
+        var result = try transform(allocator, input, .{});
+        defer result.deinit(allocator);
+        try std.testing.expectEqual(@as(usize, 0), result.diagnostics.len);
+        try std.testing.expectEqualStrings(output, result.code);
+    }
+}
+
 test "enum lowering aliases duplicate references using Yuku identifier nodes" {
     const allocator = std.testing.allocator;
     const source = "enum E { A = 1, A = 2, B = A }\n";

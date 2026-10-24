@@ -532,11 +532,8 @@ const AlignedWriter = struct {
     }
 
     fn append_comments(self: *AlignedWriter, start: u32, end: u32) Allocator.Error!void {
-        try self.flush_generated();
-        var comments: std.ArrayList(u8) = .empty;
-        defer comments.deinit(self.allocator);
-        try self.file.comment_cursor().append_range(&comments, self.allocator, start, end);
-        if (comments.items.len > 0) try self.append(comments.items);
+        var comments = self.file.comment_cursor().iterate(start, end);
+        while (comments.next()) |chunk| try self.append(chunk);
     }
 
     fn append_expression(
