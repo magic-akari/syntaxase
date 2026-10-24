@@ -24,6 +24,10 @@ export function runApiTests({ stripTypes, transform }, label) {
 		const directives = 'function f() { "custom"; type T = number; "use strict"; return this === undefined; } f();';
 		assert.equal(vm.runInNewContext(erase(directives)), false);
 	}
+	const namespaceSource = "namespace N { declare const enum E { A } }";
+	assert.equal(stripTypes(namespaceSource), ";" + " ".repeat(namespaceSource.length - 1));
+	assert.equal(vm.runInNewContext(transform(`${namespaceSource} typeof N;`)), "object");
+	assert.equal(vm.runInNewContext(transform("namespace N { export const enum E { A } } N.E.A;")), 0);
 
 	assert.equal(
 		transform("const element = <div />;\n", { jsx: true }),

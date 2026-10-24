@@ -596,6 +596,23 @@ test "multiline JSX fragments preserve child columns and closing lines" {
     );
 }
 
+test "strip-only namespace classification preserves runtime lowering" {
+    const allocator = std.testing.allocator;
+    const source = "namespace N { declare const enum E { A } }";
+    var stripped = try stripTypes(allocator, source, .{});
+    defer stripped.deinit(allocator);
+    try std.testing.expectEqualStrings(";" ++ @as([source.len - 1]u8, @splat(' ')), stripped.code);
+    try std.testing.expectEqual(@as(usize, 0), stripped.diagnostics.len);
+
+    var lowered = try transform(allocator, source, .{});
+    defer lowered.deinit(allocator);
+    try std.testing.expectEqualStrings(
+        "var       N;(function(N){ ;                          })(N||(N={}));",
+        lowered.code,
+    );
+    try std.testing.expectEqual(@as(usize, 0), lowered.diagnostics.len);
+}
+
 test "stripTypes preserves JavaScript UTF-16 width" {
     const allocator = std.testing.allocator;
     const source = "const value: 类型𝒳 = input;\n";

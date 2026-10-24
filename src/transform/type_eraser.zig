@@ -54,6 +54,7 @@ fn erase_internal(
         .runtime = runtime,
     };
     defer visitor.outer_statements.deinit(edits.allocator);
+    defer visitor.strip_namespaces.deinit(edits.allocator);
     try parser.traverser.basic.traverse(Visitor, tree, &visitor);
 }
 
@@ -63,6 +64,7 @@ const Visitor = struct {
     runtime: ?*runtime_transformer.RuntimeFeatureCollection,
     statement: StatementContext = .{},
     outer_statements: std.ArrayList(StatementContext) = .empty,
+    strip_namespaces: namespace_semantics.StripNamespaces = .{},
 
     pub fn enter_node(
         self: *Visitor,
@@ -331,7 +333,7 @@ const Visitor = struct {
         index: NodeIndex,
         ctx: *Ctx,
     ) Allocator.Error!Action {
-        if (!namespace_semantics.is_type_only_module(ctx.tree, declaration)) return .proceed;
+        if (!try self.is_erased_module(ctx.tree, index, declaration)) return .proceed;
 
         try self.erase_whole_node(index, ctx);
         return .skip;
@@ -514,7 +516,7 @@ const Visitor = struct {
         ctx: *Ctx,
     ) Allocator.Error!Action {
         if (declaration.export_kind == .type or
-            is_whole_type_declaration(ctx.tree, declaration.declaration))
+            try self.is_whole_type_declaration(ctx.tree, declaration.declaration))
         {
             try self.erase_whole_node(index, ctx);
             return .skip;
@@ -555,7 +557,7 @@ const Visitor = struct {
         index: NodeIndex,
         ctx: *Ctx,
     ) Allocator.Error!Action {
-        if (!is_whole_type_declaration(ctx.tree, declaration.declaration)) return .proceed;
+        if (!try self.is_whole_type_declaration(ctx.tree, declaration.declaration)) return .proceed;
 
         try self.erase_whole_node(index, ctx);
         return .skip;
@@ -593,6 +595,38 @@ const Visitor = struct {
         const previous = self.statement.previous_retained orelse return false;
         const last = self.tokens.last(previous) orelse return false;
         return last.tag != .semicolon;
+    }
+
+    fn is_erased_module(
+        self: *Visitor,
+        tree: *const parser.ast.Tree,
+        index: NodeIndex,
+        declaration: parser.ast.TSModuleDeclaration,
+    ) Allocator.Error!bool {
+        if (self.runtime != null) return namespace_semantics.is_type_only_module(tree, declaration);
+        return self.strip_namespaces.is_erasable(self.edits.allocator, tree, index);
+    }
+
+    fn is_whole_type_declaration(
+        self: *Visitor,
+        tree: *const parser.ast.Tree,
+        index: NodeIndex,
+    ) Allocator.Error!bool {
+        if (index == .null) return false;
+        return switch (tree.data(index)) {
+            .ts_type_alias_declaration,
+            .ts_interface_declaration,
+            .ts_namespace_export_declaration,
+            .ts_global_declaration,
+            => true,
+            .function => |function| function.type == .ts_declare_function,
+            .class => |class| class.declare,
+            .variable_declaration => |declaration| declaration.declare,
+            .ts_enum_declaration => |declaration| declaration.declare,
+            .ts_module_declaration => |declaration| try self.is_erased_module(tree, index, declaration),
+            .ts_import_equals_declaration => |declaration| declaration.import_kind == .type,
+            else => false,
+        };
     }
 
     fn add_statement_separator(
@@ -1206,25 +1240,6 @@ fn next_import_specifier(
         if (tree.data(index) == .import_specifier) return index;
     }
     return .null;
-}
-
-fn is_whole_type_declaration(tree: *const parser.ast.Tree, index: NodeIndex) bool {
-    if (index == .null) return false;
-
-    return switch (tree.data(index)) {
-        .ts_type_alias_declaration,
-        .ts_interface_declaration,
-        .ts_namespace_export_declaration,
-        .ts_global_declaration,
-        => true,
-        .function => |function| function.type == .ts_declare_function,
-        .class => |class| class.declare,
-        .variable_declaration => |declaration| declaration.declare,
-        .ts_enum_declaration => |declaration| declaration.declare,
-        .ts_module_declaration => |declaration| namespace_semantics.is_type_only_module(tree, declaration),
-        .ts_import_equals_declaration => |declaration| declaration.import_kind == .type,
-        else => false,
-    };
 }
 
 fn accessibility_tag(accessibility: parser.ast.Accessibility) parser.ast.TokenTag {
@@ -3148,6 +3163,23 @@ test "strip preserves UTF-16 offsets when substituting Unicode whitespace" {
     try expect_strip(.ts, "value\u{3000}as T\n(next)();", "value;    \n(next)();");
     try expect_strip(.ts, "𝒳\u{3000}as T\n(next)();", "𝒳;    \n(next)();");
     try expect_strip(.ts, "value\u{00a0}satisfies T\n[next]();", "value;           \n[next]();");
+}
+
+test "strip erases namespaces containing only explicit type exports or ambient const enums" {
+    const ambient_enum = "namespace N { declare const enum E { A } }";
+    try expect_strip(.ts, ambient_enum, ";" ++ @as([ambient_enum.len - 1]u8, @splat(' ')));
+    const exported_enum = "export namespace N { declare const enum E { A } }";
+    try expect_strip(.ts, exported_enum, ";" ++ @as([exported_enum.len - 1]u8, @splat(' ')));
+    const type_exports = "namespace N { interface T {} export { type T, type T as U }; }";
+    try expect_strip(.ts, type_exports, ";" ++ @as([type_exports.len - 1]u8, @splat(' ')));
+    const empty_export = "namespace N { export {}; }";
+    try expect_strip(.ts, empty_export, ";" ++ @as([empty_export.len - 1]u8, @splat(' ')));
+    const nested_exports = "export namespace N { namespace M { interface T {} export { type T }; } }";
+    try expect_strip(.ts, nested_exports, ";" ++ @as([nested_exports.len - 1]u8, @splat(' ')));
+    const nested_ambient = "namespace N { declare namespace M { const enum E { A } } }";
+    try expect_strip(.ts, nested_ambient, ";" ++ @as([nested_ambient.len - 1]u8, @splat(' ')));
+    const inherited_ambient = "namespace N { declare namespace M { namespace K { const enum E { A } } } }";
+    try expect_strip(.ts, inherited_ambient, ";" ++ @as([inherited_ambient.len - 1]u8, @splat(' ')));
 }
 
 test "strip preserves statement boundaries beyond the recursive walker depth" {
