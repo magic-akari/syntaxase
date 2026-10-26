@@ -12,13 +12,41 @@ const Allocator = std.mem.Allocator;
 const Ctx = parser.traverser.basic.Ctx;
 const NodeIndex = parser.ast.NodeIndex;
 
-const StatementContext = struct {
-    container: NodeIndex = .null,
-    previous_retained: ?parser.ast.Span = null,
+/// Lazily advance each queried statement list once, without tracking every AST
+/// node or reclassifying declarations that the eraser has already removed.
+const StatementCursor = struct {
+    position: usize = 0,
+    previous_retained: NodeIndex = .null,
     // An erased item already protects the next item from this predecessor.
     separated: bool = false,
     directive_prologue: bool = false,
-    erased: bool = false,
+
+    fn advance(
+        self: *StatementCursor,
+        tree: *const parser.ast.Tree,
+        statements: []const NodeIndex,
+        index: NodeIndex,
+    ) void {
+        while (self.position < statements.len and statements[self.position] != index) : (self.position += 1) {
+            const previous = statements[self.position];
+            if (previous == .null) continue;
+            self.previous_retained = previous;
+            self.separated = false;
+            self.directive_prologue = self.directive_prologue and tree.data(previous) == .directive;
+        }
+        std.debug.assert(self.position < statements.len);
+    }
+
+    fn erase(self: *StatementCursor) void {
+        self.position += 1;
+        self.separated = true;
+        self.directive_prologue = false;
+    }
+};
+
+const StatementBoundary = struct {
+    needs_separator: bool = false,
+    cursor: ?*StatementCursor = null,
 };
 
 /// Collects the first source-preserving TypeScript erasures directly from the
@@ -53,7 +81,7 @@ fn erase_internal(
         .tokens = tokens,
         .runtime = runtime,
     };
-    defer visitor.outer_statements.deinit(edits.allocator);
+    defer visitor.statement_cursors.deinit(edits.allocator);
     defer visitor.strip_namespaces.deinit(edits.allocator);
     try parser.traverser.basic.traverse(Visitor, tree, &visitor);
 }
@@ -62,8 +90,7 @@ const Visitor = struct {
     edits: *fixed_edit_buffer.FixedEditBuffer,
     tokens: token_index.TokenIndex,
     runtime: ?*runtime_transformer.RuntimeFeatureCollection,
-    statement: StatementContext = .{},
-    outer_statements: std.ArrayList(StatementContext) = .empty,
+    statement_cursors: std.AutoHashMapUnmanaged(NodeIndex, StatementCursor) = .empty,
     strip_namespaces: namespace_semantics.StripNamespaces = .{},
 
     pub fn enter_node(
@@ -73,19 +100,6 @@ const Visitor = struct {
         ctx: *Ctx,
     ) Allocator.Error!Action {
         if (self.runtime) |runtime| try runtime.collect_node(data, index, ctx);
-        if (ctx.path.parent() == self.statement.container) self.statement.erased = false;
-        if (is_statement_list(data)) {
-            if (self.statement.container != .null) {
-                try self.outer_statements.append(self.edits.allocator, self.statement);
-            }
-            self.statement = .{
-                .container = index,
-                .directive_prologue = switch (data) {
-                    .program, .function_body, .ts_module_block => true,
-                    else => false,
-                },
-            };
-        }
         return .proceed;
     }
 
@@ -96,15 +110,6 @@ const Visitor = struct {
         ctx: *Ctx,
     ) void {
         if (self.runtime) |runtime| runtime.exit_node(data, index, ctx);
-        if (is_statement_list(data)) {
-            self.statement = self.outer_statements.pop() orelse .{};
-        }
-        if (ctx.path.parent() != self.statement.container) return;
-        if (!self.statement.erased) {
-            self.statement.previous_retained = ctx.tree.span(index);
-            self.statement.separated = false;
-        }
-        self.statement.directive_prologue = self.statement.directive_prologue and data == .directive;
     }
 
     pub fn enter_ts_type_annotation(
@@ -571,30 +576,41 @@ const Visitor = struct {
     fn erase_whole_node(self: *Visitor, index: NodeIndex, ctx: *Ctx) Allocator.Error!void {
         const span = ctx.tree.span(index);
         try self.edits.add_blank(span.start, span.end);
-        if (self.needs_semicolon_before_erasure(index, ctx)) {
+        const boundary = try self.statement_boundary(index, ctx);
+        if (boundary.needs_separator) {
             try self.add_statement_separator(span);
         }
-        if (ctx.path.parent() == self.statement.container) {
-            self.statement.erased = true;
-            self.statement.separated = true;
-        }
+        if (boundary.cursor) |cursor| cursor.erase();
     }
 
-    fn needs_semicolon_before_erasure(
+    fn statement_boundary(
         self: *Visitor,
         index: NodeIndex,
         ctx: *Ctx,
-    ) bool {
-        const parent_index = ctx.path.parent() orelse return false;
+    ) Allocator.Error!StatementBoundary {
+        const parent_index = ctx.path.parent() orelse return .{};
         const parent = ctx.tree.data(parent_index);
-        if (is_required_statement_slot(parent, index)) return true;
+        if (is_required_statement_slot(parent, index)) return .{ .needs_separator = true };
 
-        if (parent_index != self.statement.container) return false;
-        if (self.statement.directive_prologue) return true;
-        if (self.statement.separated) return false;
-        const previous = self.statement.previous_retained orelse return false;
-        const last = self.tokens.last(previous) orelse return false;
-        return last.tag != .semicolon;
+        const statements = statement_list(ctx.tree, parent) orelse return .{};
+        const entry = try self.statement_cursors.getOrPut(self.edits.allocator, parent_index);
+        const cursor = entry.value_ptr;
+        if (!entry.found_existing) {
+            cursor.* = .{ .directive_prologue = switch (parent) {
+                .program, .function_body, .ts_module_block => true,
+                else => false,
+            } };
+        }
+        cursor.advance(ctx.tree, statements, index);
+        var boundary: StatementBoundary = .{ .cursor = cursor };
+        if (cursor.directive_prologue) {
+            boundary.needs_separator = true;
+        } else if (!cursor.separated and cursor.previous_retained != .null) {
+            if (self.tokens.last(ctx.tree.span(cursor.previous_retained))) |last| {
+                boundary.needs_separator = last.tag != .semicolon;
+            }
+        }
+        return boundary;
     }
 
     fn is_erased_module(
@@ -744,7 +760,8 @@ const Visitor = struct {
     ) Allocator.Error!void {
         if (!hazardous_key or protected_by_javascript_syntax) return;
         if (first_erased_modifier != member_span.start) return;
-        if (!self.needs_semicolon_before_erasure(index, ctx)) return;
+        const boundary = try self.statement_boundary(index, ctx);
+        if (!boundary.needs_separator) return;
 
         try self.edits.add_substitution(member_span.start, .semicolon);
     }
@@ -1176,10 +1193,16 @@ fn is_horizontal_whitespace(byte: u8) bool {
     return byte == ' ' or byte == '\t' or byte == '\x0b' or byte == '\x0c';
 }
 
-fn is_statement_list(data: parser.ast.NodeData) bool {
+fn statement_list(tree: *const parser.ast.Tree, data: parser.ast.NodeData) ?[]const NodeIndex {
     return switch (data) {
-        .program, .function_body, .block_statement, .class_body, .ts_module_block, .static_block, .switch_case => true,
-        else => false,
+        .program => |node| tree.extra(node.body),
+        .function_body => |node| tree.extra(node.body),
+        .block_statement => |node| tree.extra(node.body),
+        .class_body => |node| tree.extra(node.body),
+        .ts_module_block => |node| tree.extra(node.body),
+        .static_block => |node| tree.extra(node.body),
+        .switch_case => |node| tree.extra(node.consequent),
+        else => null,
     };
 }
 
@@ -3162,6 +3185,24 @@ test "strip preserves directive prologues across statement scopes" {
         .ts,
         "run()\ntype T = number;\ninterface I {}\n(next)();",
         "run()\n;               \n              \n(next)();",
+    );
+}
+
+test "strip preserves statement boundaries across nested scopes and retained class members" {
+    try expect_strip(
+        .ts,
+        "'custom'; type A = number; function inner() { 'custom'; type B = number; 'use strict'; } type C = number; 'use strict';",
+        "'custom'; ;                function inner() { 'custom'; ;                'use strict'; } ;                'use strict';",
+    );
+    try expect_strip(
+        .ts,
+        "class C { field = call()\npublic [key]() {}\ndeclare erased: number;\npublic [other]() {} }",
+        "class C { field = call()\n;      [key]() {}\n;                      \n       [other]() {} }",
+    );
+    try expect_strip(
+        .ts,
+        "{ run()\ntype A = number;\n(next)(); } { run(); type B = number; 'use strict'; }",
+        "{ run()\n;               \n(next)(); } { run();                  'use strict'; }",
     );
 }
 
