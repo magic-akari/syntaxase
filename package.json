@@ -4,8 +4,8 @@
 	"private": true,
 	"type": "module",
 	"devDependencies": {
-		"@dprint/biome": "0.15.2",
-		"@dprint/markdown": "0.28.2",
+		"@dprint/biome": "0.15.6",
+		"@dprint/markdown": "0.29.0",
 		"dprint-plugin-yaml": "0.6.0"
 	}
 }
