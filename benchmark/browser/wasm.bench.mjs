@@ -1,4 +1,5 @@
 import Babel from "@babel/standalone";
+import { transform as initializeTypestrip, transformSync as typestripTransform } from "@nibling/typestrip";
 import { transformSync as oxcTransform } from "oxc-transform/browser";
 import { transform as sucraseTransform } from "sucrase";
 import tsBlankSpace from "ts-blank-space";
@@ -17,6 +18,7 @@ const corpusById = new Map(BENCHMARK_CORPUS.map((corpus) => [corpus.id, corpus])
 
 test("warmed browser transform comparison", async () => {
 	expect(globalThis.crossOriginIsolated).toBe(true);
+	await initializeTypestrip("");
 
 	const scenarios = createScenarios();
 	for (const scenario of scenarios) {
@@ -95,7 +97,7 @@ function createScenarios() {
 					run: () => sucraseTransform(tsx.source, tsxSucraseOptions).code,
 				},
 			],
-			note: "ts-blank-space is omitted because it preserves JSX rather than lowering the automatic runtime.",
+			note: "ts-blank-space and typestrip preserve JSX and are omitted from the JSX lowering comparison.",
 		},
 	];
 }
@@ -125,6 +127,12 @@ function createTypeErasureScenario(corpus) {
 			{
 				name: "Syntaxase WASM",
 				run: () => stripTypes(corpus.source),
+				preservesOffsets: true,
+			},
+			{
+				name: "typestrip WASM",
+				run: () => typestripTransform(corpus.source),
+				preservesOffsets: true,
 			},
 			{
 				name: "Oxc WASI",
@@ -172,6 +180,9 @@ function preflight(scenario, implementation) {
 	const second = implementation.run();
 	if (first !== second) {
 		throw new Error(`${implementation.name} produced non-deterministic output for ${scenario.label}`);
+	}
+	if (implementation.preservesOffsets && first.length !== scenario.corpus.source.length) {
+		throw new Error(`${implementation.name} changed the UTF-16 length for ${scenario.label}`);
 	}
 	validateJavaScript(`${implementation.name} ${scenario.label}`, first);
 }

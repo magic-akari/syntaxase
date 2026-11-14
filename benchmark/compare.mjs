@@ -3,6 +3,7 @@ import process from "node:process";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 
+import { transformSync as typestripTransform } from "@nibling/typestrip";
 import { transformSync as oxcTransform } from "oxc-transform";
 
 import { BENCHMARK_CORPUS, readCorpus } from "./corpus.mjs";
@@ -48,11 +49,21 @@ for (const scenario of scenarios) {
 	const oxcOptions = { lang: corpus.lang, ...scenario.oxcOptions };
 
 	preflightNative(scenario, source);
+	if (scenario.nativeMode === "strip") preflightTypestrip(scenario, source);
 	preflightOxc(scenario, corpus.upstreamPath, source, oxcOptions);
 
 	const native = measureNative(scenario.nativeMode, source);
 	const oxc = measureOxc(corpus.upstreamPath, source, oxcOptions);
 	writeLane(`${scenario.label}: ${corpus.label}`, sourceBuffer.length, native, oxc);
+	if (scenario.nativeMode === "strip") {
+		const result = measure(() => typestripTransform(source).length);
+		writeResult(
+			"typestrip WASM (Node)",
+			sourceBuffer.length,
+			result.medianNanoseconds,
+			native.medianNanoseconds / result.medianNanoseconds,
+		);
+	}
 }
 
 function findCorpus(id) {
@@ -68,6 +79,18 @@ function preflightNative(scenario, source) {
 		throw new Error(`Syntaxase produced non-deterministic output for ${scenario.label}`);
 	}
 	validateJavaScript(`Syntaxase ${scenario.label}`, first);
+}
+
+function preflightTypestrip(scenario, source) {
+	const first = typestripTransform(source);
+	const second = typestripTransform(source);
+	if (first !== second) {
+		throw new Error(`typestrip produced non-deterministic output for ${scenario.label}`);
+	}
+	if (first.length !== source.length) {
+		throw new Error(`typestrip changed the UTF-16 length for ${scenario.label}`);
+	}
+	validateJavaScript(`typestrip ${scenario.label}`, first);
 }
 
 function preflightOxc(scenario, filename, source, options) {
@@ -124,23 +147,30 @@ function assertNoOxcErrors(result, label) {
 }
 
 function measureOxc(filename, source, options) {
-	let checksum = 0;
 	const run = () => {
 		const result = oxcTransform(filename, source, options);
-		checksum = Math.imul(checksum ^ result.code.length ^ result.errors.length, 16_777_619);
+		return result.code.length ^ result.errors.length;
+	};
+	return measure(run);
+}
+
+function measure(run) {
+	let checksum = 0;
+	const invoke = () => {
+		checksum = Math.imul(checksum ^ run(), 16_777_619);
 	};
 
 	const warmupEnd = performance.now() + 300;
 	let warmupIterations = 0;
 	while (performance.now() < warmupEnd) {
-		run();
+		invoke();
 		warmupIterations += 1;
 	}
 
 	const calibration = [];
 	for (let index = 0; index < 3; index += 1) {
 		const start = process.hrtime.bigint();
-		run();
+		invoke();
 		calibration.push(Math.max(1, Number(process.hrtime.bigint() - start)));
 	}
 	calibration.sort((left, right) => left - right);
@@ -150,7 +180,7 @@ function measureOxc(filename, source, options) {
 	const samples = [];
 	for (let sample = 0; sample < 7; sample += 1) {
 		const start = process.hrtime.bigint();
-		for (let iteration = 0; iteration < iterations; iteration += 1) run();
+		for (let iteration = 0; iteration < iterations; iteration += 1) invoke();
 		const elapsed = Number(process.hrtime.bigint() - start);
 		samples.push(elapsed / iterations);
 	}
@@ -172,10 +202,14 @@ function writeLane(label, bytes, native, oxc) {
 	process.stdout.write(`\n${label} (${bytes} bytes)\n`);
 	process.stdout.write("Implementation          ms/op       MiB/s       speed\n");
 	for (const [name, nanoseconds, ratio] of entries) {
-		const milliseconds = nanoseconds / 1e6;
-		const throughput = bytes / (1024 * 1024) / (nanoseconds / 1e9);
-		process.stdout.write(
-			`${name.padEnd(20)} ${milliseconds.toFixed(3).padStart(8)} ${throughput.toFixed(1).padStart(11)} ${`${ratio.toFixed(2)}x`.padStart(11)}\n`,
-		);
+		writeResult(name, bytes, nanoseconds, ratio);
 	}
+}
+
+function writeResult(name, bytes, nanoseconds, ratio) {
+	const milliseconds = nanoseconds / 1e6;
+	const throughput = bytes / (1024 * 1024) / (nanoseconds / 1e9);
+	process.stdout.write(
+		`${name.padEnd(20)} ${milliseconds.toFixed(3).padStart(8)} ${throughput.toFixed(1).padStart(11)} ${`${ratio.toFixed(2)}x`.padStart(11)}\n`,
+	);
 }
