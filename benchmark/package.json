@@ -4,7 +4,7 @@
 	"type": "module",
 	"dependencies": {
 		"@babel/standalone": "8.1.2",
-		"@nibling/typestrip": "0.0.2",
+		"@nibling/typestrip": "0.1.0",
 		"@oxc-transform/binding-wasm32-wasip1": "0.158.0",
 		"oxc-transform": "0.158.0",
 		"sucrase": "3.35.1",
